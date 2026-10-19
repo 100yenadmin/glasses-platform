@@ -1,5 +1,6 @@
 """Hermes gateway transport for authenticated smart-glasses companion apps."""
 import asyncio
+from dataclasses import dataclass, field
 import logging
 import time
 from uuid import uuid4
@@ -19,11 +20,19 @@ logger = logging.getLogger(__name__)
 ACTIVE = None
 
 
+@dataclass(eq=False)
+class Turn:
+    """One in-flight user turn. Its reply is sent once, when Hermes finishes processing it."""
+    conn: Connection
+    id: str
+    parts: list = field(default_factory=list)  # reply text so far, in order
+    stream: str | None = None  # message id of the live stream segment (its text is parts[-1])
+
+
 class GlassesAdapter(BasePlatformAdapter):
     authorization_is_upstream = True
     supports_async_delivery = True
     MAX_MESSAGE_LENGTH = 4000
-    REQUIRES_EDIT_FINALIZE = True
 
     def __init__(self, config):
         super().__init__(config, Platform('glasses'))
@@ -42,7 +51,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self.registry = Registry()
         self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)))
         self.broker = PhotoBroker(self._max_frame_mb)
-        self._tokens, self._active_turn = {}, {}
+        self._tokens, self._active_turn, self._user_locks = {}, {}, {}
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -92,6 +101,10 @@ class GlassesAdapter(BasePlatformAdapter):
             if not task.cancelled() and task.exception() is not None:
                 logger.error('glasses: query processing failed (%s)', type(task.exception()).__name__)
         task.add_done_callback(done)
+        return task
+
+    def _lock(self, user):
+        return self._user_locks.setdefault(user, asyncio.Lock())
 
     async def _websocket(self, request):
         auth = request.headers.get('Authorization', '')
@@ -108,7 +121,7 @@ class GlassesAdapter(BasePlatformAdapter):
             await conn.send_json(protocol.welcome())
             # Queued pushes wait until the protocol is known: after `hello` (v1), before the first other frame,
             # or after a short grace period (v0 clients that only listen).
-            self._spawn(self._flush_later(conn, 2.0))
+            conn.flush_task = self._spawn(self._flush_later(conn, 2.0))
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
                     continue
@@ -137,9 +150,17 @@ class GlassesAdapter(BasePlatformAdapter):
                 elif kind == 'debug':
                     logger.info('glasses device debug: %s', str(frame.get('msg', ''))[:500])
         finally:
-            self.registry.remove(conn)
-            self.broker.cancel_all(conn)
+            self._release(conn)
         return ws
+
+    def _release(self, conn):
+        self.registry.remove(conn)
+        self.broker.cancel_all(conn)
+        if conn.flush_task:
+            conn.flush_task.cancel()
+        for _, text, origin, message_id in conn.pending:  # never settled: keep them for the next connection
+            self.outbox.append(conn.identity.user, text, origin, message_id)
+        conn.pending = []
 
     async def _new_session(self, conn):
         conn.last_photo_at = 0
@@ -156,7 +177,7 @@ class GlassesAdapter(BasePlatformAdapter):
         turn_id = frame.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
         # Hermes owns queued turns; on_processing_start selects their exact reply socket.
-        self._active_turn.setdefault(user, (conn, turn_id))
+        self._active_turn.setdefault(user, Turn(conn, turn_id))
         photo = None
         image = frame.get('image') if conn.protocol == 1 else None
         if isinstance(image, dict):
@@ -186,98 +207,137 @@ class GlassesAdapter(BasePlatformAdapter):
         await self.handle_message(event)
 
     def _targets(self, user):
-        active = self._active_turn.get(user)
+        # During a turn only the asking device gets its deltas, status and reply.
+        turn = self._active_turn.get(user)
         live = self.registry.live(user)
-        if active and active[0] in live:
-            return [active[0]]
+        if turn:
+            return [turn.conn] if turn.conn in live else []
         return live
 
     async def _flush_outbox(self, conn):
-        if conn.flushed:
-            return
-        conn.flushed = True
-        for _, text, origin, message_id in self.outbox.drain(conn.identity.user):
-            await conn.send_json(protocol.push(conn.protocol, text, origin, message_id))
+        user = conn.identity.user
+        async with self._lock(user):
+            if conn.flushed:
+                return
+            conn.flushed = True
+            items, conn.pending = self.outbox.drain(user) + conn.pending, []
+            sent = 0
+            try:
+                for _, text, origin, message_id in items:
+                    if not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
+                        break
+                    sent += 1
+            finally:
+                self.outbox.restore(user, items[sent:])  # unsent (closed or cancelled) stay queued, in order
 
     async def _flush_later(self, conn, delay):
         await asyncio.sleep(delay)
         await self._flush_outbox(conn)
 
     async def _push(self, user, content, origin, message_id):
-        # Only devices whose protocol is settled get live pushes; otherwise queue (the next flush delivers it).
-        ready = [c for c in self.registry.live(user) if c.flushed]
-        for conn in ready:
-            await conn.send_json(protocol.push(conn.protocol, content, origin, message_id))
-        if not ready:
-            self.outbox.append(user, content, origin, message_id)
+        # The per-user lock keeps queued and live pushes in order. Devices whose protocol is not settled
+        # yet hold the push until their flush; with no device reachable it waits in the outbox.
+        async with self._lock(user):
+            delivered = False
+            for conn in self.registry.live(user):
+                if not conn.flushed:
+                    conn.pending.append((time.time(), content, origin, message_id))
+                    delivered = True
+                elif await conn.send_json(protocol.push(conn.protocol, content, origin, message_id)):
+                    delivered = True
+            if not delivered:
+                self.outbox.append(user, content, origin, message_id)
         return SendResult(success=True, message_id=message_id)
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
         user, metadata = str(chat_id), metadata or {}
         message_id = uuid4().hex
-        # Text approval prompts are interim-tagged by Hermes but must reach every client in full.
-        if metadata.get('is_approval_prompt'):
-            return await self._push(user, content, 'approval', message_id)
+        # Human-decision prompts (text approvals, clarify questions) must reach every device in full.
+        if metadata.get('is_approval_prompt') or metadata.get('glasses_prompt'):
+            return await self._push(user, content, metadata.get('glasses_prompt') or 'approval', message_id)
         origin = metadata.get('origin') or ('cron' if metadata.get('job_id') else None)
-        active = self._active_turn.get(user)
-        if active and origin is None:
-            final = bool(metadata.get('notify')) and not metadata.get('_interim_send')
-            targets = self._targets(user)
-            if not targets and final:
-                self.outbox.append(user, content, 'message', message_id)  # asker went offline mid-turn
-            for conn in targets:
-                if final:
-                    await conn.send_json(protocol.response(conn.protocol, content, active[1]))
-                elif conn.protocol == 1:
-                    await conn.send_json(protocol.response_delta(active[1], content))
+        turn = self._active_turn.get(user)
+        if turn is None or origin is not None:
+            return await self._push(user, content, origin or 'message', message_id)
+        if metadata.get('expect_edits') and not metadata.get('_interim_send'):
+            # A new stream segment supersedes earlier segments: the reply is the turn's last segment.
+            turn.parts, turn.stream = [content], message_id
+        elif metadata.get('notify') and not metadata.get('_interim_send'):
+            if turn.stream:
+                turn.parts[-1], turn.stream = content, None
+            else:
+                turn.parts.append(content)
+        else:
+            # Tool progress, commentary, busy and long-running notices: status detail only, never a reply.
+            await self._status(user, 'working', content)
             return SendResult(success=True, message_id=message_id)
-        return await self._push(user, content, origin or 'message', message_id)
-
-    async def edit_message(self, chat_id, message_id, content, *, finalize=False):
-        active = self._active_turn.get(str(chat_id))
-        if active:
-            targets = self._targets(str(chat_id))
-            if not targets and finalize:
-                self.outbox.append(str(chat_id), content, 'message', uuid4().hex)
-            for conn in targets:
-                if finalize:
-                    await conn.send_json(protocol.response(conn.protocol, content, active[1]))
-                elif conn.protocol == 1:
-                    await conn.send_json(protocol.response_delta(active[1], content))
+        await self._reply_delta(user, turn)
         return SendResult(success=True, message_id=message_id)
 
-    async def _status(self, user, state):
-        for conn in self._targets(str(user)):
+    async def edit_message(self, chat_id, message_id, content, *, finalize=False):
+        user = str(chat_id)
+        turn = self._active_turn.get(user)
+        if turn and message_id == turn.stream:
+            turn.parts[-1] = content
+            await self._reply_delta(user, turn)
+        elif turn:
+            await self._status(user, 'working', content)  # an edited progress bubble
+        return SendResult(success=True, message_id=message_id)
+
+    async def _reply_delta(self, user, turn):
+        for conn in self._targets(user):
             if conn.protocol == 1:
-                await conn.send_json(protocol.status(state))
+                await conn.send_json(protocol.response_delta(turn.id, '\n\n'.join(turn.parts)))
+
+    async def send_clarify(self, *args, metadata=None, **kwargs):
+        return await super().send_clarify(*args, metadata={**(metadata or {}), 'glasses_prompt': 'clarify'}, **kwargs)
+
+    async def _status(self, user, state, detail=None):
+        frame = protocol.status(state, detail)
+        for conn in self._targets(str(user)):
+            if conn.protocol != 1 or conn.last_status == frame:
+                continue
+            if state == 'thinking' and conn.last_status.get('state') == 'working':
+                continue  # the typing refresh must not hide the latest activity detail
+            conn.last_status = frame
+            await conn.send_json(frame)
 
     async def send_typing(self, chat_id, metadata=None):
         await self._status(chat_id, 'thinking')
 
     async def stop_typing(self, chat_id):
-        await self._status(chat_id, 'idle')
+        # Mid-turn typing pauses are not the end of a turn; on_processing_complete reports idle.
+        if str(chat_id) not in self._active_turn:
+            await self._status(chat_id, 'idle')
 
     async def on_processing_start(self, event):
         user = event.source.chat_id
         conn = getattr(event, '_glasses_connection', None)
-        if conn:
-            self._active_turn[user] = (conn, event.message_id)
+        turn = self._active_turn.get(user)
+        if conn and not (turn and turn.id == event.message_id):
+            self._active_turn[user] = Turn(conn, event.message_id)
         await self._status(user, 'thinking')
 
     async def on_processing_complete(self, event, outcome):
         user = event.source.chat_id
-        active = self._active_turn.get(user)
-        if active and active[1] == event.message_id:
-            await self._status(user, 'idle')
-            self._active_turn.pop(user, None)
+        turn = self._active_turn.get(user)
+        if not (turn and turn.id == event.message_id):
+            return
+        # Exactly one reply per turn: stream previews and segment preambles never end a turn early.
+        text = '\n\n'.join(part for part in turn.parts if part)
+        if text and not (turn.conn in self.registry.live(user)
+                         and await turn.conn.send_json(protocol.response(turn.conn.protocol, text, turn.id))):
+            await self._push(user, text, 'reply', uuid4().hex)  # the asker went offline: deliver out of band
+        await self._status(user, 'idle')
+        self._active_turn.pop(user, None)
 
     async def get_chat_info(self, chat_id):
         return {'name': chat_id, 'type': 'dm'}
 
     async def capture_for_session(self, user, reason='tool'):
         async def capture():
-            active = self._active_turn.get(user)
-            conn = self.registry.pick_camera(user, active[0] if active else None)
+            turn = self._active_turn.get(user)
+            conn = self.registry.pick_camera(user, turn.conn if turn else None)
             if conn is None:
                 return None
             data = await self.broker.request(conn, reason, self._photo_timeout)

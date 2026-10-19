@@ -36,8 +36,11 @@ def capture_photo(version, request, reason):
     return frame
 
 
-def status(state):
-    return {'type': 'status', 'state': state}
+def status(state, detail=None):
+    frame = {'type': 'status', 'state': state}
+    if detail:
+        frame['detail'] = str(detail)[:200]
+    return frame
 
 
 def welcome():

@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from glasses_plugin.adapter import Turn
 from glasses_plugin.devices import Connection, Identity
 from gateway.platforms.event import MessageType, ProcessingOutcome
 
@@ -16,6 +17,10 @@ async def until(ws, kind):
             frame = await ws.receive_json()
             if frame['type'] == kind:
                 return frame
+
+
+def turn_event(message_id, user='alice'):
+    return type('Event', (), {'source': type('Source', (), {'chat_id': user})(), 'message_id': message_id})()
 
 
 async def opened(client, token='tok-alice-1', version=1, camera=True):
@@ -42,8 +47,9 @@ async def test_user_and_device_routing(server):
     await bob.send_json({'type': 'ping'})
     assert (await bob.receive_json())['type'] == 'pong'
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = (conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1')
     await adapter.send('alice', 'reply', metadata={'notify': True})
+    await adapter.on_processing_complete(turn_event('t1'), ProcessingOutcome.SUCCESS)
     assert (await until(alice, 'response'))['turn'] == 't1'
     await phone.send_json({'type': 'ping'})
     assert (await phone.receive_json())['type'] == 'pong'
@@ -138,22 +144,27 @@ async def test_streaming_and_lifecycle(server, version):
     adapter, client = server
     ws = await opened(client, version=version)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = (conn, 'turn')
-    await adapter.send('alice', 'a', metadata={'_interim_send': True})
-    await adapter.edit_message('alice', 'message', 'ab')
+    adapter._active_turn['alice'] = Turn(conn, 'turn')
+    await adapter.send('alice', 'Let me look.', metadata={'_interim_send': True})
+    first = await adapter.send('alice', 'a', metadata={'expect_edits': True})
+    await adapter.edit_message('alice', first.message_id, 'ab')
+    # Hermes finalizes progress-bubble edits and segment breaks too; neither may end the turn.
+    await adapter.edit_message('alice', 'progress-bubble', 'tool line', finalize=True)
+    await adapter.edit_message('alice', first.message_id, 'abc', finalize=True)
     if version:
+        assert (await until(ws, 'status'))['detail'] == 'Let me look.'
         assert (await until(ws, 'response_delta'))['text'] == 'a'
         assert (await until(ws, 'response_delta'))['text'] == 'ab'
-    await adapter.edit_message('alice', 'message', 'abc', finalize=True)
-    final = await ws.receive_json()
-    assert final['type'] == 'response' and final['text'] == 'abc'
-    event = type('Event', (), {'source': type('Source', (), {'chat_id': 'alice'})(), 'message_id': 'older'})()
-    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
-    assert adapter._active_turn['alice'][1] == 'turn'
-    event.message_id = 'turn'
-    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+        assert (await until(ws, 'status'))['detail'] == 'tool line'
+        assert (await until(ws, 'response_delta'))['text'] == 'abc'
+    await adapter.on_processing_complete(turn_event('older'), ProcessingOutcome.SUCCESS)
+    assert adapter._active_turn['alice'].id == 'turn'
+    await adapter.on_processing_complete(turn_event('turn'), ProcessingOutcome.SUCCESS)
     assert 'alice' not in adapter._active_turn
+    final = await ws.receive_json()  # v0: the very first frame after welcome is the one reply
+    assert final['type'] == 'response' and final['text'] == 'abc'
     if version:
+        assert final['turn'] == 'turn' and final['final'] is True
         assert (await until(ws, 'status'))['state'] == 'idle'
     await ws.close()
 
@@ -181,6 +192,8 @@ async def test_startup_replay_restores_route_and_notify_marks_final(server):
     await adapter.send('alice', 'preview', metadata={'expect_edits': True})
     assert (await until(ws, 'response_delta'))['text'] == 'preview'
     await adapter.send('alice', 'final', metadata={'notify': True})
-    assert (await until(ws, 'response'))['turn'] == 'replayed'
+    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+    final = await until(ws, 'response')
+    assert final['turn'] == 'replayed' and final['text'] == 'final'
     assert adapter.config.home_channel.chat_id == 'alice'
     await ws.close()

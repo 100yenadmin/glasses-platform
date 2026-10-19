@@ -52,6 +52,9 @@ class Connection:
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_photo_at: float = 0.0
     flushed: bool = False  # offline queue delivered (after the protocol is known)
+    last_status: dict = field(default_factory=dict)  # last status frame sent (repeats are dropped)
+    pending: list = field(default_factory=list)  # pushes held until the protocol is known
+    flush_task: object = None
 
     async def send_json(self, frame):
         async with self.send_lock:
@@ -109,6 +112,11 @@ class Outbox:
         self._prune(user)
         items = self._items.setdefault(user, deque(maxlen=self.maxlen))
         items.append((self.clock(), text, origin, message_id or uuid4().hex))
+
+    def restore(self, user, items):
+        """Put undelivered items back at the front, in order: they are older than anything queued since."""
+        if items:
+            self._items.setdefault(user, deque(maxlen=self.maxlen)).extendleft(reversed(items))
 
     def drain(self, user):
         self._prune(user)
