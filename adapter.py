@@ -1,5 +1,6 @@
 """Hermes gateway transport for authenticated smart-glasses companion apps."""
 import asyncio
+from collections import deque
 from dataclasses import dataclass, field
 import logging
 import time
@@ -22,18 +23,27 @@ ACTIVE = None
 
 @dataclass(eq=False)
 class Turn:
-    """One in-flight user turn. Its reply is sent once, when Hermes finishes processing it."""
+    """Reply state of one Hermes processing chain for a user. Hermes runs queued follow-up queries inside the
+    opening query's processing, so one chain answers its queries one after another."""
     conn: Connection
-    id: str
-    parts: list = field(default_factory=list)  # reply text so far, in order
-    stream: str | None = None  # message id of the live stream segment (its text is parts[-1])
+    id: str  # the query being answered now
     reset: bool = False  # the device's own new_session: answers Hermes' /new confirm, ends with session_reset
+    started: bool = False  # Hermes began processing the opener (on_processing_start)
+    opener: str = ''  # the query that opened the chain; its completion ends the chain
+    text: str = ''  # the reply so far: the latest stream segment or final send (replies are never chunked)
+    stream: str | None = None  # message id of the live stream segment
+    commentary: str = ''  # the latest interim commentary, the reply when Hermes delivered the answer that way
+    ids: set = field(default_factory=set)
+
+    def __post_init__(self):
+        self.opener = self.opener or self.id
+        self.ids.add(self.id)
 
 
 class GlassesAdapter(BasePlatformAdapter):
     authorization_is_upstream = True
     supports_async_delivery = True
-    MAX_MESSAGE_LENGTH = 4000
+    MAX_MESSAGE_LENGTH = 1_000_000  # never chunk: a reply is one message, so the last one sent is the answer
 
     def __init__(self, config):
         super().__init__(config, Platform('glasses'))
@@ -53,6 +63,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)))
         self.broker = PhotoBroker(self._max_frame_mb)
         self._tokens, self._active_turn, self._user_locks = {}, {}, {}
+        self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -159,8 +170,9 @@ class GlassesAdapter(BasePlatformAdapter):
         self.broker.cancel_all(conn)
         if conn.flush_task:
             conn.flush_task.cancel()
-        for _, text, origin, message_id in conn.pending:  # never settled: keep them for the next connection
-            self.outbox.append(conn.identity.user, text, origin, message_id)
+        # Never settled: keep its pushes for the next connection, unless another device already received them.
+        delivered = self._delivered.get(conn.identity.user, ())
+        self.outbox.merge(conn.identity.user, [item for item in conn.pending if item[3] not in delivered])
         conn.pending = []
 
     async def _new_session(self, conn):
@@ -176,6 +188,9 @@ class GlassesAdapter(BasePlatformAdapter):
         user = conn.identity.user
         turn_id = frame.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
+        self._queries[turn_id] = conn
+        while len(self._queries) > 200:
+            self._queries.pop(next(iter(self._queries)))
         # Hermes owns queued turns; on_processing_start selects their exact reply socket.
         self._active_turn.setdefault(user, Turn(conn, turn_id, reset=reset))
         photo = None
@@ -221,15 +236,22 @@ class GlassesAdapter(BasePlatformAdapter):
             if conn.flushed:
                 return
             conn.flushed = True
-            items, conn.pending = self.outbox.drain(user) + conn.pending, []
-            sent = 0
+            items = sorted({item[3]: item for item in [*self.outbox.drain(user), *conn.pending]}.values(),
+                           key=lambda item: item[0])
+            conn.pending, sent = [], 0
             try:
                 for _, text, origin, message_id in items:
                     if not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
                         break
+                    self._mark_delivered(user, message_id)
                     sent += 1
             finally:
-                self.outbox.restore(user, items[sent:])  # unsent (closed or cancelled) stay queued, in order
+                if sent < len(items):  # closed or cancelled: keep the rest queued, retry on the next frame
+                    conn.flushed = False
+                    self.outbox.merge(user, items[sent:])
+
+    def _mark_delivered(self, user, message_id):
+        self._delivered.setdefault(user, deque(maxlen=500)).append(message_id)
 
     async def _flush_later(self, conn, delay):
         await asyncio.sleep(delay)
@@ -239,14 +261,15 @@ class GlassesAdapter(BasePlatformAdapter):
         # The per-user lock keeps queued and live pushes in order. Devices whose protocol is not settled
         # yet hold the push until their flush; with no device reachable it waits in the outbox.
         async with self._lock(user):
-            delivered = False
+            reached = False
             for conn in self.registry.live(user):
                 if not conn.flushed:
                     conn.pending.append((time.time(), content, origin, message_id))
-                    delivered = True
+                    reached = True
                 elif await conn.send_json(protocol.push(conn.protocol, content, origin, message_id)):
-                    delivered = True
-            if not delivered:
+                    self._mark_delivered(user, message_id)
+                    reached = True
+            if not reached:
                 self.outbox.append(user, content, origin, message_id)
         return SendResult(success=True, message_id=message_id)
 
@@ -258,28 +281,29 @@ class GlassesAdapter(BasePlatformAdapter):
             return await self._push(user, content, metadata.get('glasses_prompt') or 'approval', message_id)
         origin = metadata.get('origin') or ('cron' if metadata.get('job_id') else None)
         turn = self._active_turn.get(user)
-        if turn is None or origin is not None:
+        final = metadata.get('notify') and not metadata.get('_interim_send')
+        if final and reply_to in self._queries and not (turn and reply_to in turn.ids):
+            # A command answered inline while a turn runs (/stop, /status): the reply to that query alone.
+            await self._deliver_reply(user, self._queries[reply_to], reply_to, content)
+        elif turn is None or origin is not None:
             return await self._push(user, content, origin or 'message', message_id)
-        if metadata.get('expect_edits') and not metadata.get('_interim_send'):
-            # A new stream segment supersedes earlier segments: the reply is the turn's last segment.
-            turn.parts, turn.stream = [content], message_id
-        elif metadata.get('notify') and not metadata.get('_interim_send'):
-            if turn.stream:
-                turn.parts[-1], turn.stream = content, None
-            else:
-                turn.parts.append(content)
+        elif metadata.get('expect_edits') and not metadata.get('_interim_send'):
+            turn.text, turn.stream = content, message_id  # a new stream segment: the reply is the last one
+            await self._reply_delta(user, turn)
+        elif final:
+            turn.text, turn.stream = content, None
         else:
             # Tool progress, commentary, busy and long-running notices: status detail only, never a reply.
+            if metadata.get('_interim_send'):
+                turn.commentary = content
             await self._status(user, 'working', content)
-            return SendResult(success=True, message_id=message_id)
-        await self._reply_delta(user, turn)
         return SendResult(success=True, message_id=message_id)
 
     async def edit_message(self, chat_id, message_id, content, *, finalize=False):
         user = str(chat_id)
         turn = self._active_turn.get(user)
         if turn and message_id == turn.stream:
-            turn.parts[-1] = content
+            turn.text = content
             await self._reply_delta(user, turn)
         elif turn:
             await self._status(user, 'working', content)  # an edited progress bubble
@@ -288,7 +312,20 @@ class GlassesAdapter(BasePlatformAdapter):
     async def _reply_delta(self, user, turn):
         for conn in self._targets(user):
             if conn.protocol == 1:
-                await conn.send_json(protocol.response_delta(turn.id, '\n\n'.join(turn.parts)))
+                await conn.send_json(protocol.response_delta(turn.id, turn.text))
+
+    async def _deliver_reply(self, user, conn, query_id, text):
+        if not (conn in self.registry.live(user) and await conn.send_json(protocol.response(conn.protocol, text, query_id))):
+            await self._push(user, text, 'reply', uuid4().hex)  # the asker went offline: deliver out of band
+
+    async def _finish_query(self, user, turn):
+        """Answer the query the chain is on, exactly once."""
+        if turn.reset:  # v0 contract: new_session is answered by session_reset alone
+            if turn.conn in self.registry.live(user):
+                await turn.conn.send_json(protocol.session_reset())
+        elif turn.text or turn.commentary:
+            await self._deliver_reply(user, turn.conn, turn.id, turn.text or turn.commentary)
+        await self._status(user, 'idle')
 
     async def send_slash_confirm(self, chat_id, title, message, session_key, confirm_id, metadata=None):
         # The device's new_session button is the user's explicit confirmation of the /new it sends; anything
@@ -323,28 +360,27 @@ class GlassesAdapter(BasePlatformAdapter):
 
     async def on_processing_start(self, event):
         user = event.source.chat_id
-        conn = getattr(event, '_glasses_connection', None)
+        conn = getattr(event, '_glasses_connection', None) or self._queries.get(event.message_id)
+        reset = getattr(event, '_glasses_reset', False)
         turn = self._active_turn.get(user)
-        if conn and not (turn and turn.id == event.message_id):
-            self._active_turn[user] = Turn(conn, event.message_id, reset=getattr(event, '_glasses_reset', False))
+        if conn and (turn is None or not turn.started):
+            self._active_turn[user] = Turn(conn, event.message_id, reset=reset, started=True)
+        elif conn and event.message_id != turn.id:
+            # A queued follow-up runs inside the opener's processing: the previous query is answered first.
+            await self._finish_query(user, turn)
+            turn.conn, turn.id, turn.reset, turn.text, turn.stream, turn.commentary = (
+                conn, event.message_id, reset, '', None, '')
+            turn.ids.add(event.message_id)
         await self._status(user, 'thinking')
 
     async def on_processing_complete(self, event, outcome):
         user = event.source.chat_id
         turn = self._active_turn.get(user)
-        if not (turn and turn.id == event.message_id):
-            return
-        # Exactly one reply per turn: stream previews and segment preambles never end a turn early.
-        text = '\n\n'.join(part for part in turn.parts if part)
-        if turn.reset:  # v0 contract: new_session is answered by session_reset alone
-            text = ''
-            if turn.conn in self.registry.live(user):
-                await turn.conn.send_json(protocol.session_reset())
-        if text and not (turn.conn in self.registry.live(user)
-                         and await turn.conn.send_json(protocol.response(turn.conn.protocol, text, turn.id))):
-            await self._push(user, text, 'reply', uuid4().hex)  # the asker went offline: deliver out of band
-        await self._status(user, 'idle')
-        self._active_turn.pop(user, None)
+        # Follow-ups complete inside the opener's processing, before their reply is sent; only the opener's
+        # completion (after Hermes' final send) ends the chain.
+        if turn and turn.started and event.message_id == turn.opener:
+            await self._finish_query(user, turn)
+            self._active_turn.pop(user, None)
 
     async def get_chat_info(self, chat_id):
         return {'name': chat_id, 'type': 'dm'}

@@ -96,6 +96,8 @@ to a device that declared `camera:false`.
   frames. If that device went offline, the reply goes out as a `push` with origin `reply`.
 - Pushes, approval prompts and clarify questions go to every live device of the same user (v0 gets them as
   `response`) and never to another user. Answer a prompt with an ordinary `query`, for example `/approve`.
+- A query sent while another is running is answered after it, on its own device. A command Hermes answers at once
+  (`/stop`, `/status`) gets its own reply. Replies are never split into several messages.
 - A device that is connected but has not settled its protocol holds new pushes until it does. If no device is live,
   the server queues pushes (50 items, 24 h) and delivers them in order on the next connect. In M0 the queue is lost
   on server restart.

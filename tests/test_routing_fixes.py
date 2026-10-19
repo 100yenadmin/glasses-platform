@@ -42,7 +42,7 @@ async def test_cron_push_during_active_turn_is_not_swallowed(server):
     adapter, client = server
     v1 = await opened(client, version=1)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     await adapter.send('alice', 'cron says hi', metadata={'job_id': 'j2'})
     frame = await until(v1, 'push')
     assert frame['text'] == 'cron says hi' and frame['origin'] == 'cron'
@@ -56,7 +56,7 @@ async def test_cron_push_during_active_turn_reaches_v0_as_response(server):
     await v0.send_json({'type': 'ping'})  # first non-hello frame settles v0 and flushes
     await until(v0, 'pong')
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     await adapter.send('alice', 'cron for v0', metadata={'job_id': 'j3'})
     assert (await until(v0, 'response'))['text'] == 'cron for v0'
     await v0.close()
@@ -67,7 +67,7 @@ async def test_final_reply_is_queued_when_asking_device_went_offline(server):
     adapter, client = server
     ws = await opened(client, version=1)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     await ws.close()
     for _ in range(50):  # let the server notice the close
         if not adapter.registry.live('alice'):
@@ -88,7 +88,7 @@ async def test_text_approval_prompt_reaches_v0_and_v1(server):
     await v0.send_json({'type': 'ping'})
     await until(v0, 'pong')
     conn = next(c for c in adapter.registry.live('alice') if c.protocol == 1)
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     meta = {'_interim_send': True, 'is_approval_prompt': True}
     await adapter.send('alice', 'Approve running rm? Reply /approve or /deny', metadata=meta)
     assert (await until(v1, 'push'))['origin'] == 'approval'
@@ -106,7 +106,7 @@ async def test_clarify_question_reaches_v0_and_v1(server):
     await v0.send_json({'type': 'ping'})
     await until(v0, 'pong')
     conn = next(c for c in adapter.registry.live('alice') if c.protocol == 1)
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     # Hermes sends the text clarify prompt with no notify/interim marker, like a progress bubble.
     await adapter.send_clarify('alice', 'Which door?', None, 'clarify-1', 'session-1')
     push = await until(v1, 'push')
@@ -122,14 +122,14 @@ async def test_clarify_question_reaches_v0_and_v1(server):
      'The sign says 42.'),
     # Streamed answer whose final arrives as a fresh notify send -> replaces the preview.
     ([('The sign', {'expect_edits': True}), ('The sign says 42.', {'notify': True})], 'The sign says 42.'),
-    # Not streamed: a final split into chunks -> all chunks, in order.
-    ([('Part one.', {'notify': True}), ('Part two.', {'notify': True})], 'Part one.\n\nPart two.'),
+    # One-shot preamble then one-shot answer (replies are never chunked) -> the last final only.
+    ([('Let me check.', {'notify': True}), ('The sign says 42.', {'notify': True})], 'The sign says 42.'),
 ])
 async def test_one_reply_per_turn_from_segments(server, sends, expected):
     adapter, client = server
     ws = await opened(client, version=0)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     stream_id = None
     for text, meta in sends:
         if meta == 'edit':
@@ -148,7 +148,7 @@ async def test_typing_refresh_and_pauses_do_not_flap_status(server):
     adapter, client = server
     ws = await opened(client, version=1)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     await adapter.send_typing('alice')
     await adapter.send('alice', 'web_search: glasses', metadata=None)
     await adapter.send_typing('alice')  # refresh tick
@@ -173,7 +173,7 @@ async def test_slash_confirm_is_answered_only_for_the_devices_own_new_session(se
     from tools import slash_confirm
     ws = await opened(client, version=0)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1', reset=reset)
+    adapter._active_turn['alice'] = Turn(conn, 't1', reset=reset, started=True)
     choices = []
 
     async def handler(choice):
@@ -184,4 +184,20 @@ async def test_slash_confirm_is_answered_only_for_the_devices_own_new_session(se
     result = await adapter.send_slash_confirm('alice', 'Confirm /new', 'prompt', 'session-alice', 'c1')
     assert result.success is reset and choices == (['once'] if reset else [])
     slash_confirm.clear('session-alice')
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_non_streamed_final_sends_no_delta_to_v1(server):
+    adapter, client = server
+    ws = await opened(client, version=1)
+    conn = adapter.registry.live('alice')[0]
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
+    await adapter.send('alice', 'Azure', metadata={'notify': True})
+    await adapter.on_processing_complete(turn_event('t1'), ProcessingOutcome.SUCCESS)
+    await ws.send_json({'type': 'ping'})
+    kinds = []
+    while (frame := await ws.receive_json())['type'] != 'pong':
+        kinds.append(frame['type'])
+    assert kinds == ['response', 'status']
     await ws.close()

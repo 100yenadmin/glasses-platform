@@ -42,7 +42,7 @@ async def test_reply_for_offline_asker_goes_out_of_band_not_as_their_turn(server
     adapter, _ = server
     glasses = await device(adapter, 'ray', flushed=True)
     phone = await device(adapter, 'phone', flushed=True)
-    adapter._active_turn['alice'] = Turn(glasses, 't1')
+    adapter._active_turn['alice'] = Turn(glasses, 't1', started=True)
     glasses.ws.closed = True
     preview = await adapter.send('alice', 'The answ', metadata={'expect_edits': True})
     await adapter.edit_message('alice', preview.message_id, 'The answer.')
@@ -112,3 +112,108 @@ async def test_cancelled_flush_requeues_the_unsent_batch(server):
     with pytest.raises(asyncio.CancelledError):
         await flush
     assert [item[1] for item in adapter.outbox.drain('alice')] == ['one', 'two']
+
+
+def started(adapter, message_id, conn):
+    event = turn_event(message_id)
+    event._glasses_connection = conn
+    adapter._queries[message_id] = conn
+    return event
+
+
+def replies(conn):
+    return [(f.get('turn'), f['text']) for f in conn.ws.frames if f['type'] == 'response']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('streaming', [False, True])
+async def test_queued_follow_up_chain_answers_each_query_on_its_own_device(server, streaming):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    phone = await device(adapter, 'phone', flushed=True)
+    a, b = started(adapter, 'A', glasses), started(adapter, 'B', phone)
+    await adapter.on_processing_start(a)
+    if streaming:
+        preview = await adapter.send('alice', 'Answer', metadata={'expect_edits': True})
+        await adapter.edit_message('alice', preview.message_id, 'Answer A.', finalize=True)
+    else:  # Hermes' queued-lane first response, anchored to the opener
+        await adapter.send('alice', 'Answer A.', reply_to='A', metadata={'notify': True})
+    await adapter.on_processing_start(b)  # in-band follow-up (gateway/run_turn.py)
+    assert replies(glasses) == [('A', 'Answer A.')]
+    await adapter.on_processing_complete(b, ProcessingOutcome.SUCCESS)  # fires before B's final send
+    await adapter.send('alice', 'Answer B.', reply_to='A', metadata={'notify': True})  # terminal reply, opener anchor
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('A', 'Answer A.')] and replies(phone) == [('B', 'Answer B.')]
+    assert not [f for f in phone.ws.frames + glasses.ws.frames if f['type'] == 'push']
+    assert 'alice' not in adapter._active_turn
+
+
+@pytest.mark.asyncio
+async def test_answer_delivered_as_commentary_is_still_the_reply(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    await adapter.send('alice', 'The sign says 42.', metadata={'_interim_send': True})
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('A', 'The sign says 42.')]
+
+
+@pytest.mark.asyncio
+async def test_inline_command_reply_goes_to_its_own_query_not_the_running_turn(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    phone = await device(adapter, 'phone', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    await adapter.send('alice', 'Answer A.', metadata={'notify': True})
+    adapter._queries['STOP'] = phone  # a /stop sent from the phone, answered inline by base.py
+    await adapter.send('alice', 'Stopped.', reply_to='STOP', metadata={'notify': True})
+    assert replies(phone) == [('STOP', 'Stopped.')]
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('A', 'Answer A.')]
+
+
+@pytest.mark.asyncio
+async def test_pending_copies_merge_without_reorder_or_replay(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray')
+    await adapter.send('alice', 'ONE', metadata={'origin': 'cron'})
+    phone = await device(adapter, 'phone')
+    await adapter.send('alice', 'TWO', metadata={'origin': 'cron'})
+    adapter._release(phone)  # TWO was delivered nowhere yet: it goes back to the outbox
+    await adapter._flush_outbox(glasses)
+    assert texts(glasses) == ['ONE', 'TWO']
+    assert adapter.outbox.drain('alice') == []
+
+
+@pytest.mark.asyncio
+async def test_pending_copy_already_delivered_elsewhere_is_not_replayed(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray')
+    phone = await device(adapter, 'phone', flushed=True)
+    await adapter.send('alice', 'TWO', metadata={'origin': 'cron'})
+    assert texts(phone) == ['TWO']
+    adapter._release(glasses)
+    assert adapter.outbox.drain('alice') == []
+
+
+class FlakyWS(FakeWS):
+    async def send_json(self, frame):
+        if not getattr(self, 'failed', False):
+            self.failed = True
+            raise ConnectionError('transient')
+        await super().send_json(frame)
+
+
+@pytest.mark.asyncio
+async def test_failed_flush_is_retried_before_newer_pushes(server):
+    adapter, _ = server
+    adapter.outbox.append('alice', 'OLD')
+    conn = await device(adapter, 'ray', FlakyWS())
+    await adapter._flush_outbox(conn)
+    assert texts(conn) == [] and not conn.flushed
+    await adapter.send('alice', 'NEW', metadata={'origin': 'cron'})
+    assert texts(conn) == []  # held, not overtaking OLD
+    await adapter._flush_outbox(conn)  # the device's next frame
+    assert texts(conn) == ['OLD', 'NEW']

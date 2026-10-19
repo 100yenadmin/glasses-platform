@@ -23,7 +23,7 @@ def register(ctx):
         emoji='👓', platform_hint='Replies are spoken or shown on a tiny lens: use 1–3 short sentences, no markdown, no tables, no raw URLs unless asked.',
         cron_deliver_env_var='GLASSES_HOME_CHANNEL', allowed_users_env='GLASSES_ALLOWED_USERS',
         allow_all_env='GLASSES_ALLOW_ALL_USERS', is_connected=configured,
-        env_enablement_fn=env_enablement, max_message_length=4000)
+        env_enablement_fn=env_enablement)
     supported = {f.name for f in fields(PlatformEntry)}
     ctx.register_platform(
         name='glasses', label='Smart glasses', adapter_factory=GlassesAdapter,

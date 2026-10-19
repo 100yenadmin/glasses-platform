@@ -16,13 +16,13 @@ def test_registration_and_filtered_kwargs(monkeypatch):
     p, t = captured['platform'], captured['tool']
     assert p['name'] == 'glasses' and p['label'] == 'Smart glasses'
     assert p['check_fn']() and p['cron_deliver_env_var'] == 'GLASSES_HOME_CHANNEL'
-    assert p['max_message_length'] == 4000 and 'display_tier' not in p
+    assert 'max_message_length' not in p and 'display_tier' not in p  # replies are never chunked
     assert not p['validate_config'](SimpleNamespace(extra={}))
     assert p['validate_config'](SimpleNamespace(extra={'token': 'tok-a'}))
     assert t['name'] == 'glasses_capture_photo' and t['is_async'] and t['toolset'] == 'glasses'
     monkeypatch.setattr('glasses_plugin.fields', lambda cls: [SimpleNamespace(name='emoji')])
     register(ctx)
-    assert 'emoji' in captured['platform'] and 'max_message_length' not in captured['platform']
+    assert 'emoji' in captured['platform'] and 'platform_hint' not in captured['platform']
 
 
 @pytest.mark.asyncio

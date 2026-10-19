@@ -113,10 +113,12 @@ class Outbox:
         items = self._items.setdefault(user, deque(maxlen=self.maxlen))
         items.append((self.clock(), text, origin, message_id or uuid4().hex))
 
-    def restore(self, user, items):
-        """Put undelivered items back at the front, in order: they are older than anything queued since."""
+    def merge(self, user, items):
+        """Re-add items with their original times: one copy per message id, oldest first, newest kept."""
         if items:
-            self._items.setdefault(user, deque(maxlen=self.maxlen)).extendleft(reversed(items))
+            self._prune(user)
+            merged = {item[3]: item for item in [*self._items.get(user, ()), *items]}
+            self._items[user] = deque(sorted(merged.values(), key=lambda item: item[0]), maxlen=self.maxlen)
 
     def drain(self, user):
         self._prune(user)

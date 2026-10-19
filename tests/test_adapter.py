@@ -47,7 +47,7 @@ async def test_user_and_device_routing(server):
     await bob.send_json({'type': 'ping'})
     assert (await bob.receive_json())['type'] == 'pong'
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 't1')
+    adapter._active_turn['alice'] = Turn(conn, 't1', started=True)
     await adapter.send('alice', 'reply', metadata={'notify': True})
     await adapter.on_processing_complete(turn_event('t1'), ProcessingOutcome.SUCCESS)
     assert (await until(alice, 'response'))['turn'] == 't1'
@@ -148,7 +148,7 @@ async def test_streaming_and_lifecycle(server, version):
     adapter, client = server
     ws = await opened(client, version=version)
     conn = adapter.registry.live('alice')[0]
-    adapter._active_turn['alice'] = Turn(conn, 'turn')
+    adapter._active_turn['alice'] = Turn(conn, 'turn', started=True)
     await adapter.send('alice', 'Let me look.', metadata={'_interim_send': True})
     first = await adapter.send('alice', 'a', metadata={'expect_edits': True})
     await adapter.edit_message('alice', first.message_id, 'ab')
@@ -188,10 +188,11 @@ async def test_startup_replay_restores_route_and_notify_marks_final(server):
     ws = await opened(client)
     await ws.send_json({'type': 'query', 'id': 'replayed', 'text': 'hello'})
     event = await asyncio.wait_for(events.get(), 3)
+    # A completion for a query whose processing never started does not end anything.
     await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
-    assert not adapter._active_turn
+    assert not adapter._active_turn['alice'].started
     await adapter.on_processing_start(event)
-    assert (await until(ws, 'status'))['state'] == 'idle'
+    assert adapter._active_turn['alice'].started
     assert (await until(ws, 'status'))['state'] == 'thinking'
     await adapter.send('alice', 'preview', metadata={'expect_edits': True})
     assert (await until(ws, 'response_delta'))['text'] == 'preview'
