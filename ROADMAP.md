@@ -7,7 +7,7 @@ its exit criteria are proven, not when its code merges.
 
 Plan, protocol, and a working Hermes-side channel driven by a simulator.
 
-- [ ] Design plan and protocol docs ([PLAN.md](docs/PLAN.md), [PROTOCOL.md](docs/PROTOCOL.md))
+- [x] Design plan and protocol docs ([PLAN.md](docs/PLAN.md), [PROTOCOL.md](docs/PROTOCOL.md))
 - [ ] Plugin skeleton: `plugin.yaml` (`kind: platform`), `register(ctx)`, `GlassesAdapter`
 - [ ] Token auth (fail closed, `4401`), device registry, one session per user
 - [ ] v0 compatibility with the hermes-glasses iOS bridge protocol
