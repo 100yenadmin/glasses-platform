@@ -129,8 +129,12 @@ async def test_malformed_new_session_inline(server):
     await ws.send_json({'type': 'query', 'text': []})
     assert (await until(ws, 'error'))['message'] == 'Empty query.'
     await ws.send_json({'type': 'new_session'})
-    await until(ws, 'session_reset')
-    assert (await asyncio.wait_for(events.get(), 3)).text == '/new'
+    reset = await asyncio.wait_for(events.get(), 3)
+    assert reset.text == '/new'
+    await adapter.on_processing_start(reset)
+    await adapter.send('alice', 'New session started.', metadata={'notify': True})
+    await adapter.on_processing_complete(reset, ProcessingOutcome.SUCCESS)
+    assert (await until(ws, 'session_reset')) == {'type': 'session_reset'}
     await ws.send_json({'type': 'query', 'text': 'hello', 'image': {'data': base64.b64encode(JPEG.read_bytes()).decode()}})
     event = await asyncio.wait_for(events.get(), 3)
     assert event.message_type is MessageType.PHOTO

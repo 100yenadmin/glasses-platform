@@ -164,3 +164,24 @@ async def test_typing_refresh_and_pauses_do_not_flap_status(server):
                       {'type': 'status', 'state': 'working', 'detail': 'web_search: glasses'},
                       {'type': 'status', 'state': 'idle'}]
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reset', [True, False])
+async def test_slash_confirm_is_answered_only_for_the_devices_own_new_session(server, reset):
+    adapter, client = server
+    from tools import slash_confirm
+    ws = await opened(client, version=0)
+    conn = adapter.registry.live('alice')[0]
+    adapter._active_turn['alice'] = Turn(conn, 't1', reset=reset)
+    choices = []
+
+    async def handler(choice):
+        choices.append(choice)
+        return 'done'
+
+    slash_confirm.register('session-alice', 'c1', 'new', handler)
+    result = await adapter.send_slash_confirm('alice', 'Confirm /new', 'prompt', 'session-alice', 'c1')
+    assert result.success is reset and choices == (['once'] if reset else [])
+    slash_confirm.clear('session-alice')
+    await ws.close()

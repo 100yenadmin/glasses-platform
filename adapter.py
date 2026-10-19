@@ -27,6 +27,7 @@ class Turn:
     id: str
     parts: list = field(default_factory=list)  # reply text so far, in order
     stream: str | None = None  # message id of the live stream segment (its text is parts[-1])
+    reset: bool = False  # the device's own new_session: answers Hermes' /new confirm, ends with session_reset
 
 
 class GlassesAdapter(BasePlatformAdapter):
@@ -164,10 +165,9 @@ class GlassesAdapter(BasePlatformAdapter):
 
     async def _new_session(self, conn):
         conn.last_photo_at = 0
-        await self._process_query(conn, {'type': 'query', 'text': '/new'})
-        await conn.send_json(protocol.session_reset())
+        await self._process_query(conn, {'type': 'query', 'text': '/new'}, reset=True)
 
-    async def _process_query(self, conn, frame):
+    async def _process_query(self, conn, frame, reset=False):
         text = frame.get('text', '')
         text = text.strip() if isinstance(text, str) else ''
         if not text:
@@ -177,7 +177,7 @@ class GlassesAdapter(BasePlatformAdapter):
         turn_id = frame.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
         # Hermes owns queued turns; on_processing_start selects their exact reply socket.
-        self._active_turn.setdefault(user, Turn(conn, turn_id))
+        self._active_turn.setdefault(user, Turn(conn, turn_id, reset=reset))
         photo = None
         image = frame.get('image') if conn.protocol == 1 else None
         if isinstance(image, dict):
@@ -204,6 +204,7 @@ class GlassesAdapter(BasePlatformAdapter):
             user_id=user, user_name=user, message_id=turn_id,
             media_urls=[path] if path else [], media_types=['image/jpeg'] if path else [], raw_message=raw)
         event._glasses_connection = conn  # retained through Hermes startup replay
+        event._glasses_reset = reset
         await self.handle_message(event)
 
     def _targets(self, user):
@@ -289,6 +290,16 @@ class GlassesAdapter(BasePlatformAdapter):
             if conn.protocol == 1:
                 await conn.send_json(protocol.response_delta(turn.id, '\n\n'.join(turn.parts)))
 
+    async def send_slash_confirm(self, chat_id, title, message, session_key, confirm_id, metadata=None):
+        # The device's new_session button is the user's explicit confirmation of the /new it sends; anything
+        # else (a spoken "/new", /reload-mcp) falls back to Hermes' text prompt.
+        turn = self._active_turn.get(str(chat_id))
+        if not (turn and turn.reset):
+            return SendResult(success=False, error='Not supported')
+        from tools import slash_confirm
+        await slash_confirm.resolve(session_key, confirm_id, 'once')
+        return SendResult(success=True)
+
     async def send_clarify(self, *args, metadata=None, **kwargs):
         return await super().send_clarify(*args, metadata={**(metadata or {}), 'glasses_prompt': 'clarify'}, **kwargs)
 
@@ -315,7 +326,7 @@ class GlassesAdapter(BasePlatformAdapter):
         conn = getattr(event, '_glasses_connection', None)
         turn = self._active_turn.get(user)
         if conn and not (turn and turn.id == event.message_id):
-            self._active_turn[user] = Turn(conn, event.message_id)
+            self._active_turn[user] = Turn(conn, event.message_id, reset=getattr(event, '_glasses_reset', False))
         await self._status(user, 'thinking')
 
     async def on_processing_complete(self, event, outcome):
@@ -325,6 +336,10 @@ class GlassesAdapter(BasePlatformAdapter):
             return
         # Exactly one reply per turn: stream previews and segment preambles never end a turn early.
         text = '\n\n'.join(part for part in turn.parts if part)
+        if turn.reset:  # v0 contract: new_session is answered by session_reset alone
+            text = ''
+            if turn.conn in self.registry.live(user):
+                await turn.conn.send_json(protocol.session_reset())
         if text and not (turn.conn in self.registry.live(user)
                          and await turn.conn.send_json(protocol.response(turn.conn.protocol, text, turn.id))):
             await self._push(user, text, 'reply', uuid4().hex)  # the asker went offline: deliver out of band

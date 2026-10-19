@@ -58,6 +58,9 @@ streaming:
   enabled: true      # optional: stream replies to v1 clients as they are written
 ```
 
+Photo turns need a model that can see: either a main model that accepts images, or an `auxiliary.vision` model in
+`config.yaml`.
+
 The plugin refuses to start without at least one token. It listens on `0.0.0.0:8765` at `/voice` by default.
 `GLASSES_HOST`, `GLASSES_PORT` and the other settings are listed in [docs/PLAN.md](docs/PLAN.md#6-configuration).
 
@@ -72,7 +75,7 @@ GLASSES_SIM_TOKEN=<token> python sim/glasses_sim.py --url ws://127.0.0.1:8765/vo
 ```
 
 To test a photo turn, add `--photo photo.jpg`. The plugin asks the "glasses" for a photo when you say something like
-"what am I looking at?".
+"what am I looking at?". The agent can also take one itself with the `glasses_capture_photo` tool.
 
 **With the hermes-glasses iOS app:** in the app, set Settings → Assistant → Backend to Bridge, and point it at
 `ws://<your-mac>.local:8765/voice?token=<token>`.

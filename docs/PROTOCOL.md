@@ -17,7 +17,9 @@ Status: **draft for M0**. This is the contract between a glasses companion app a
 
 1. On connect the server sends `{"type":"welcome","protocol_max":1}`. v0 apps ignore the extra field.
 2. A client that sends no `hello` is treated as **v0** for the whole connection.
-3. A client that wants **v1** sends `hello` as its first frame. The server answers `hello_ack`.
+3. A client that wants **v1** sends `hello` as its first frame, within 2 seconds of `welcome`. The server answers
+   `hello_ack`. Queued pushes wait until the protocol is known: until `hello`, until the first other frame, or for
+   2 seconds, after which the connection counts as v0.
 4. New fields may be added to any frame at any time. Clients and servers must ignore unknown fields and unknown
    frame types.
 
@@ -40,7 +42,7 @@ Status: **draft for M0**. This is the contract between a glasses companion app a
 |---|---|---|
 | `welcome` | `protocol_max` | Connected and authenticated |
 | `capture_photo` | — | Take a photo now and reply with `photo` or `photo_error` within the timeout (default 25 s) |
-| `response` | `text`, `tts` (bool) | Reply text. `tts:false` means the device speaks it itself. Unsolicited `response` frames are pushes (cron, reminders). |
+| `response` | `text`, `tts` (bool) | Reply text, exactly one per `query`. `tts:false` means the device speaks it itself. Unsolicited `response` frames are pushes (cron, reminders) and approval or clarify prompts. |
 | `session_reset` | — | `/new` done |
 | `pong` | — | Keepalive reply |
 | `error` | `message` | Something went wrong, such as an empty query |
@@ -79,19 +81,24 @@ to a device that declared `camera:false`.
 
 | Frame | Fields | Meaning |
 |---|---|---|
-| `status` | `state` (`thinking`/`working`/`idle`), `detail?` | Typing indicator for the HUD |
-| `response_delta` | `turn`, `text` | **Cumulative** streamed text so far. Prefix-stable; render by replacing. |
-| `response` | `turn`, `text`, `final:true`, `tts` | The authoritative final reply |
-| `push` | `id`, `origin` (`cron`/`heartbeat`/`async`/`message`), `text` | Out-of-turn message. Fanned out to all of the user's live devices. |
+| `status` | `state` (`thinking`/`working`/`idle`), `detail?` | Activity for the HUD. `detail` is the latest tool-progress or commentary line (≤200 chars); never speak it. A turn ends with `response`, or with `idle` if the agent produced no text. |
+| `response_delta` | `turn`, `text` | **Cumulative** reply text so far (only when Hermes streaming is on). Render by replacing: it restarts when the agent begins a new segment after a tool call. |
+| `response` | `turn`, `text`, `final:true`, `tts` | The authoritative reply: exactly one per `query`, sent when Hermes finishes the turn |
+| `push` | `id`, `origin`, `text` | Out-of-turn message, fanned out to all of the user's live devices. `origin`: `message`, `cron`, `approval` (a text approval prompt), `clarify` (a question from the agent), `reply` (the reply to a query whose device went offline). Others may be added. |
 | `capture_photo` | `request`, `reason` (`keyword`/`tool`) | Photo request |
 | `approval_request` | `id`, `text`, `choices` | **M1** |
 
 ## Delivery rules
 
-- A reply goes only to the device that sent the `query`.
-- Pushes go to every live device of the same user and never to another user.
-- If no device is live, the server queues pushes (50 items, 24 h) and delivers them in order on the next connect.
-  In M0 the queue is lost on server restart.
+- Each `query` gets exactly one reply, sent when Hermes finishes the turn. Stream previews, tool progress,
+  commentary and busy notices never end a turn: v1 sees them as `response_delta` or `status`, v0 not at all.
+- A reply goes only to the device that sent the `query`, and so do that turn's `response_delta` and `status`
+  frames. If that device went offline, the reply goes out as a `push` with origin `reply`.
+- Pushes, approval prompts and clarify questions go to every live device of the same user (v0 gets them as
+  `response`) and never to another user. Answer a prompt with an ordinary `query`, for example `/approve`.
+- A device that is connected but has not settled its protocol holds new pushes until it does. If no device is live,
+  the server queues pushes (50 items, 24 h) and delivers them in order on the next connect. In M0 the queue is lost
+  on server restart.
 - Concurrent queries from one user are serialised by Hermes's session handling.
 
 ## Limits
