@@ -1,0 +1,18 @@
+{"t": "2026-10-19T17:37:22.087686+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:37:22.090834+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "sim", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:37:22.091175+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "sim", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:37:22.091201+00:00", "dir": "out", "frame": {"type": "new_session"}}
+{"t": "2026-10-19T17:37:22.091693+00:00", "dir": "in", "frame": {"type": "status", "state": "thinking"}}
+{"t": "2026-10-19T17:37:22.132834+00:00", "dir": "in", "frame": {"type": "session_reset"}}
+{"t": "2026-10-19T17:37:22.132939+00:00", "dir": "out", "frame": {"type": "query", "text": "Please call the glasses_capture_photo tool now, then tell me the number written on the sign.", "id": "7396714287b94d0ca883e6d5aee7c479"}}
+{"t": "2026-10-19T17:37:22.133048+00:00", "dir": "in", "frame": {"type": "status", "state": "idle"}}
+{"t": "2026-10-19T17:37:22.133576+00:00", "dir": "in", "frame": {"type": "status", "state": "thinking"}}
+{"t": "2026-10-19T17:37:27.560110+00:00", "dir": "in", "frame": {"type": "status", "state": "working", "detail": "\u2699\ufe0f tool_search: \"Searching tools \u00b7 glasses capture photo\""}}
+{"t": "2026-10-19T17:37:33.859727+00:00", "dir": "in", "frame": {"type": "capture_photo", "request": "724f8d5387564ed1ac33780d87537b52", "reason": "tool"}}
+{"t": "2026-10-19T17:37:33.859853+00:00", "dir": "out", "frame": {"type": "photo", "data": "<44660 bytes>", "request": "724f8d5387564ed1ac33780d87537b52"}}
+{"t": "2026-10-19T17:37:33.877571+00:00", "dir": "in", "frame": {"type": "status", "state": "working", "detail": "\u2699\ufe0f tool_search: \"Searching tools \u00b7 glasses capture photo\"\n\ud83d\udc53 glasses_capture_photo..."}}
+{"t": "2026-10-19T17:37:45.011047+00:00", "dir": "in", "frame": {"type": "status", "state": "working", "detail": "\u2699\ufe0f tool_search: \"Searching tools \u00b7 glasses capture photo\"\n\ud83d\udc53 glasses_capture_photo...\n\ud83d\udc41\ufe0f Looking at the image Is there a sign in this photo? If so,..."}}
+{"t": "2026-10-19T17:37:58.707093+00:00", "dir": "in", "frame": {"type": "response_delta", "turn": "7396714287b94d0ca883e6d5aee7c479", "text": "\n\nPhoto captured and analyzed. The sign reads \"GATE 42\" \u2014 so \u2589"}}
+{"t": "2026-10-19T17:38:03.178302+00:00", "dir": "in", "frame": {"type": "response_delta", "turn": "7396714287b94d0ca883e6d5aee7c479", "text": "\n\nPhoto captured and analyzed. The sign reads \"GATE 42\" \u2014 so the number on it is 42. \u2589"}}
+{"t": "2026-10-19T17:38:03.243923+00:00", "dir": "in", "frame": {"type": "response_delta", "turn": "7396714287b94d0ca883e6d5aee7c479", "text": "Photo captured and analyzed. The sign reads \"GATE 42\" \u2014 so the number on it is 42."}}
+{"t": "2026-10-19T17:38:03.254280+00:00", "dir": "in", "frame": {"type": "response", "text": "Photo captured and analyzed. The sign reads \"GATE 42\" \u2014 so the number on it is 42.", "tts": false, "turn": "7396714287b94d0ca883e6d5aee7c479", "final": true}}

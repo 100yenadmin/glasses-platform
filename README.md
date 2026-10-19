@@ -3,8 +3,8 @@
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: M0 preview.** The Hermes side works against the bundled simulator. No real glasses or phone app has been
-> tested yet. Read the [design plan](docs/PLAN.md), the [device protocol](docs/PROTOCOL.md) and the
+> **Status: M0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes gateway with real
+> models ([evidence](docs/evidence/M0-live-proof.md)). No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the [device protocol](docs/PROTOCOL.md) and the
 > [roadmap](ROADMAP.md).
 
 ## What it is

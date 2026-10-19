@@ -1,0 +1,7 @@
+{"t": "2026-10-19T17:40:56.799792+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:40:56.800207+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "sim", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:40:56.800866+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "sim", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:40:56.800953+00:00", "dir": "out", "frame": {"type": "query", "text": "Write a numbered list of 25 European capital cities, one per line.", "id": "68bdbb6b439e4f768c9978fd397cfaf5"}}
+{"t": "2026-10-19T17:40:56.801985+00:00", "dir": "in", "frame": {"type": "status", "state": "thinking"}}
+{"t": "2026-10-19T17:41:00.936455+00:00", "dir": "in", "frame": {"type": "status", "state": "working", "detail": "\u21aa Redirected current run (iteration 1). I'll adjust using your correction.\n\n\ud83d\udca1 First-time tip \u2014 I redirected the current run using your message. Completed work stays in context, and `/stop` still cance"}}
+{"t": "2026-10-19T17:41:05.670300+00:00", "dir": "in", "frame": {"type": "status", "state": "idle"}}

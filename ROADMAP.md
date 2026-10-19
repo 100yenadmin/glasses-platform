@@ -3,24 +3,27 @@
 Each milestone has a GitHub milestone and a tracking issue. Order is by dependency. A milestone closes only when
 its exit criteria are proven, not when its code merges.
 
-## M0 — Design + scaffold (in progress)
+## M0 — Design + scaffold (done)
 
 Plan, protocol, and a working Hermes-side channel driven by a simulator.
 
 - [x] Design plan and protocol docs ([PLAN.md](docs/PLAN.md), [PROTOCOL.md](docs/PROTOCOL.md))
-- [ ] Plugin skeleton: `plugin.yaml` (`kind: platform`), `register(ctx)`, `GlassesAdapter`
-- [ ] Token auth (fail closed, `4401`), device registry, one session per user
-- [ ] v0 compatibility with the hermes-glasses iOS bridge protocol
-- [ ] v1 handshake, `response_delta` streaming, `status`, `push`
-- [ ] Photo turns: keyword pre-capture plus the `glasses_capture_photo` tool
-- [ ] Offline outbox (in-memory) and cron delivery to `glasses:<user>`
-- [ ] Python simulator (`sim/glasses_sim.py`)
-- [ ] Unit tests, plus an opt-in integration test (real gateway, fake model)
+- [x] Plugin skeleton: `plugin.yaml` (`kind: platform`), `register(ctx)`, `GlassesAdapter`
+- [x] Token auth (fail closed, `4401`), device registry, one session per user
+- [x] v0 compatibility with the hermes-glasses iOS bridge protocol
+- [x] v1 handshake, `response_delta` streaming, `status`, `push`
+- [x] Photo turns: keyword pre-capture plus the `glasses_capture_photo` tool
+- [x] Offline outbox (in-memory) and cron delivery to `glasses:<user>`
+- [x] Python simulator (`sim/glasses_sim.py`)
+- [x] Unit tests, plus an opt-in integration test (real gateway, fake model)
 
 **Exit criteria:**
 - Unit and integration tests are green.
 - `hermes plugins validate` passes.
 - Live proof against a real gateway and a real model: a text turn, a photo turn and a cron push, in both v1 and v0 mode.
+
+**Evidence:** [docs/evidence/M0-live-proof.md](docs/evidence/M0-live-proof.md). Proven against the simulator and a real
+Hermes gateway with real models only; no real glasses or phone app yet (that is M2).
 
 ## M1 — Complete channel
 

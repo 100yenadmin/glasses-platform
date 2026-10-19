@@ -1,0 +1,7 @@
+{"t": "2026-10-19T17:36:54.760115+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:36:54.789331+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "sim", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:36:54.790981+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "sim", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:36:54.791129+00:00", "dir": "out", "frame": {"type": "query", "text": "Describe the attached image in one sentence.", "id": "93c926e50b004fe1943048b42bcc2a98", "image": {"mime": "image/jpeg", "data": "<44660 bytes>"}}}
+{"t": "2026-10-19T17:36:54.792700+00:00", "dir": "in", "frame": {"type": "status", "state": "thinking"}}
+{"t": "2026-10-19T17:37:08.722686+00:00", "dir": "in", "frame": {"type": "status", "state": "working", "detail": "\ud83d\udc41\ufe0f Looking at the image Describe this image in one sentence: ..."}}
+{"t": "2026-10-19T17:37:21.977903+00:00", "dir": "in", "frame": {"type": "response", "text": "It's a sign reading \"GATE 42\" in bold red capital letters on a white rectangle with a black border, set against a solid blue background \u2014 a typical airport or venue gate marker.", "tts": false, "turn": "93c926e50b004fe1943048b42bcc2a98", "final": true}}

@@ -1,0 +1,50 @@
+pin v0.22.2, plugin 27a1394, port 18765
+== phase A: streaming on
+A1-v1-text rc=0 secs=14
+A2-v1-photo rc=0 secs=29
+A2b-v1-inline rc=0 secs=27
+A3-v1-tool rc=0 secs=42
+A4-v1-push rc=0 secs=73
+A4-v1-push-hud rc=0
+A5-v0-text rc=0 secs=4
+A6-v1-outbox rc=0 secs=0
+A7-chain-second rc=0 secs=6
+A7-chain-first rc=2
+== phase B: streaming off
+B1-v0-text rc=0 secs=8
+B2-v1-text rc=0 secs=4
+B3-v0-photo rc=0 secs=14
+B4-v0-push rc=0 secs=33
+B5-chain-second rc=0 secs=5
+B5-chain-first rc=2
+token-leak check: clean
+PASS  A1-v1-text: exactly one reply (final, own turn)
+PASS  A2-v1-photo: keyword capture_photo
+PASS  A2-v1-photo: exactly one reply containing "42" (final, own turn)
+PASS  A2b-v1-inline: inline image needs no capture
+PASS  A2b-v1-inline: exactly one reply containing "42" (final, own turn)
+PASS  A3-v1-tool: new_session answered by session_reset
+PASS  A3-v1-tool: no /new confirm prompt reached the device
+PASS  A3-v1-tool: agent called glasses_capture_photo
+PASS  A3-v1-tool: exactly one reply containing "42" (final, own turn)
+PASS  A4-v1-push: cron push fanned out to both devices (same id)
+PASS  A5-v0-text: exactly one reply
+PASS  A6-v1-outbox: push queued while offline arrives on connect
+PASS  B1-v0-text: exactly one reply
+PASS  B2-v1-text: exactly one reply (final, own turn)
+PASS  B2-v1-text: no deltas with streaming off
+PASS  B3-v0-photo: v0-shaped capture_photo
+PASS  B3-v0-photo: exactly one reply containing "42"
+PASS  B4-v0-push: cron push reaches v0 as response
+PASS  A5-v0-text: v0 sees no v1-only frames
+PASS  B1-v0-text: v0 sees no v1-only frames
+PASS  B3-v0-photo: v0 sees no v1-only frames
+PASS  B4-v0-push: v0 sees no v1-only frames
+PASS  A7-chain-second: barge-in query gets exactly one reply, its own, containing "4"
+PASS  A7-chain-first: interrupted query gets at most one reply, its own (got 0)
+PASS  A7-chain: no reply leaked out of band as a push
+PASS  B5-chain-second: barge-in query gets exactly one reply, its own, containing "4"
+PASS  B5-chain-first: interrupted query gets at most one reply, its own (got 0)
+PASS  B5-chain: no reply leaked out of band as a push
+checks: 28/28 passed
+done

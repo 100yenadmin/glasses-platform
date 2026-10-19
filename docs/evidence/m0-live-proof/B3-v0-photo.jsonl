@@ -1,0 +1,5 @@
+{"t": "2026-10-19T17:42:43.039595+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:42:43.045861+00:00", "dir": "out", "frame": {"type": "query", "text": "What am I looking at? Read the sign.", "id": "fd0ae66e421644b89d34995ac6634d6d"}}
+{"t": "2026-10-19T17:42:43.046446+00:00", "dir": "in", "frame": {"type": "capture_photo"}}
+{"t": "2026-10-19T17:42:43.047977+00:00", "dir": "out", "frame": {"type": "photo", "data": "<44660 bytes>"}}
+{"t": "2026-10-19T17:42:56.920422+00:00", "dir": "in", "frame": {"type": "response", "text": "You're looking at a gate sign \u2014 it reads \"GATE 42\" in bold red letters on a white panel, likely marking Gate 42 at an airport or transit hub.", "tts": false}}

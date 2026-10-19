@@ -1,0 +1,4 @@
+{"t": "2026-10-19T17:38:04.321787+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:38:04.321840+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "sim", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:38:04.322014+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "sim", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:39:17.000879+00:00", "dir": "in", "frame": {"type": "push", "id": "5869931abd764f07af4e9651d8e17a34", "origin": "cron", "text": "Cronjob Response: glasses-push-live\n(job_id: d27b17ff1b2f)\n-------------\n\nCron reminder: stand up and stretch for two minutes.\n\nTo stop or manage this job, send me a new message (e.g. \"stop reminder glasses-push-live\")."}}

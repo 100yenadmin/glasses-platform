@@ -1,0 +1,9 @@
+{"t": "2026-10-19T17:36:25.459419+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:36:25.459474+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "sim", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:36:25.459643+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "sim", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:36:25.459669+00:00", "dir": "out", "frame": {"type": "query", "text": "What am I looking at? Read the sign.", "id": "75ca0e86734c4f208ea23edd54683a53"}}
+{"t": "2026-10-19T17:36:25.459873+00:00", "dir": "in", "frame": {"type": "capture_photo", "request": "8c51335a2a0d409ebc56fddc8e401c39", "reason": "keyword"}}
+{"t": "2026-10-19T17:36:25.459980+00:00", "dir": "out", "frame": {"type": "photo", "data": "<44660 bytes>", "request": "8c51335a2a0d409ebc56fddc8e401c39"}}
+{"t": "2026-10-19T17:36:25.460941+00:00", "dir": "in", "frame": {"type": "status", "state": "thinking"}}
+{"t": "2026-10-19T17:36:36.595596+00:00", "dir": "in", "frame": {"type": "status", "state": "working", "detail": "\ud83d\udc41\ufe0f Looking at the image What does this sign say exactly? Desc..."}}
+{"t": "2026-10-19T17:36:54.574037+00:00", "dir": "in", "frame": {"type": "response", "text": "The sign reads \"GATE 42\" \u2014 bold red uppercase letters on a white sign with a black border, set against a blue background. It's a typical airport or terminal gate sign pointing you to Gate 42.", "tts": false, "turn": "75ca0e86734c4f208ea23edd54683a53", "final": true}}

@@ -1,0 +1,6 @@
+{"t": "2026-10-19T17:42:39.010685+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:42:39.010746+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "sim", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:42:39.010916+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "sim", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:42:39.010952+00:00", "dir": "out", "frame": {"type": "query", "text": "Name one colour in one word.", "id": "59ed3f26692941018b2cad882b90969c"}}
+{"t": "2026-10-19T17:42:39.011303+00:00", "dir": "in", "frame": {"type": "status", "state": "thinking"}}
+{"t": "2026-10-19T17:42:42.926189+00:00", "dir": "in", "frame": {"type": "response", "text": "Blue", "tts": false, "turn": "59ed3f26692941018b2cad882b90969c", "final": true}}

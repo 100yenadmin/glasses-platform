@@ -1,0 +1,5 @@
+{"t": "2026-10-19T17:43:36.045341+00:00", "dir": "in", "frame": {"type": "welcome", "protocol_max": 1}}
+{"t": "2026-10-19T17:43:36.045402+00:00", "dir": "out", "frame": {"type": "hello", "protocol": 1, "device": {"name": "hud", "capabilities": {"camera": true}}}}
+{"t": "2026-10-19T17:43:36.045602+00:00", "dir": "in", "frame": {"type": "hello_ack", "protocol": 1, "user": "owner", "device": "hud", "server": {"plugin": "glasses-platform", "version": "0.1.0"}}}
+{"t": "2026-10-19T17:43:36.045639+00:00", "dir": "out", "frame": {"type": "query", "text": "Quick question: what is 2 plus 2? Answer with the number only.", "id": "e2ad65e34438483b830941e26363e2cb"}}
+{"t": "2026-10-19T17:43:40.054972+00:00", "dir": "in", "frame": {"type": "response", "text": "4", "tts": false, "turn": "e2ad65e34438483b830941e26363e2cb", "final": true}}
