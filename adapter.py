@@ -38,6 +38,7 @@ class Turn:
     stream: str | None = None  # message id of the live stream segment
     commentary: str = ''  # the latest interim commentary, the reply when Hermes delivered the answer that way
     notes: list = field(default_factory=list)  # media Hermes sent with the reply (text fallbacks), shown after it
+    arrivals: list = field(default_factory=list)  # queries sent mid-chain that have not started their own turn
     ids: set = field(default_factory=set)
 
     def __post_init__(self):
@@ -69,6 +70,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self.broker = PhotoBroker(self._max_frame_mb)
         self._tokens, self._active_turn, self._user_locks = {}, {}, {}
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
+        self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -182,7 +184,19 @@ class GlassesAdapter(BasePlatformAdapter):
 
     async def _new_session(self, conn):
         conn.last_photo_at = 0
-        await self._process_query(conn, {'type': 'query', 'text': '/new'}, reset=True)
+        query_id = uuid4().hex
+        self._resets[query_id] = (conn, time.monotonic())
+        await self._process_query(conn, {'type': 'query', 'text': '/new', 'id': query_id}, reset=True)
+
+    async def _ack_reset(self, query_id):
+        conn, _ = self._resets.pop(query_id, (None, 0))
+        if conn is None:
+            return
+        turn = self._active_turn.get(conn.identity.user)
+        if turn and query_id in turn.arrivals:
+            turn.arrivals.remove(query_id)  # answered: it was not folded into the running turn
+        if conn in self.registry.live(conn.identity.user):
+            await conn.send_json(protocol.session_reset())
 
     async def _process_query(self, conn, frame, reset=False):
         text = frame.get('text', '')
@@ -197,7 +211,9 @@ class GlassesAdapter(BasePlatformAdapter):
         while len(self._queries) > 200:
             self._queries.pop(next(iter(self._queries)))
         # Hermes owns queued turns; on_processing_start selects their exact reply socket.
-        self._active_turn.setdefault(user, Turn(conn, turn_id, reset=reset))
+        turn = self._active_turn.setdefault(user, Turn(conn, turn_id, reset=reset))
+        if turn.started and turn_id not in turn.ids:
+            turn.arrivals.append(turn_id)  # Hermes may queue it, or fold it into the running turn (interrupt)
         photo = None
         image = frame.get('image') if conn.protocol == 1 else None
         if isinstance(image, dict):
@@ -287,11 +303,19 @@ class GlassesAdapter(BasePlatformAdapter):
         origin = metadata.get('origin') or ('cron' if metadata.get('job_id') else None)
         turn = self._active_turn.get(user)
         final = metadata.get('notify') and not metadata.get('_interim_send')
+        owner = metadata.get('reply_to_message_id')  # stream-consumer writes name the query they belong to
         if final and reply_to in self._queries and not (turn and reply_to in turn.ids):
             # A command answered inline while a turn runs (/stop, /status): the reply to that query alone.
-            await self._deliver_reply(user, self._queries[reply_to], reply_to, content)
+            if turn and reply_to in turn.arrivals:
+                turn.arrivals.remove(reply_to)
+            if reply_to in self._resets:  # a busy new_session: v0 contract is session_reset alone
+                await self._ack_reset(reply_to)
+            else:
+                await self._deliver_reply(user, self._queries[reply_to], reply_to, content)
         elif turn is None or origin is not None:
             return await self._push(user, content, origin or 'message', message_id)
+        elif owner and owner in turn.ids and owner != turn.id:
+            await self._status(user, 'working', content)  # a superseded query's late stream write
         elif metadata.get('glasses_media'):
             turn.notes.append(content)  # a media fallback follows the reply; it never replaces it
         elif metadata.get('expect_edits') and not metadata.get('_interim_send'):
@@ -328,6 +352,7 @@ class GlassesAdapter(BasePlatformAdapter):
     async def _finish_query(self, user, turn):
         """Answer the query the chain is on, exactly once."""
         if turn.reset:  # v0 contract: new_session is answered by session_reset alone
+            self._resets.pop(turn.id, None)
             if turn.conn in self.registry.live(user):
                 await turn.conn.send_json(protocol.session_reset())
         elif turn.text or turn.commentary or turn.notes:
@@ -338,11 +363,17 @@ class GlassesAdapter(BasePlatformAdapter):
     async def send_slash_confirm(self, chat_id, title, message, session_key, confirm_id, metadata=None):
         # The device's new_session button is the user's explicit confirmation of the /new it sends; anything
         # else (a spoken "/new", /reload-mcp) falls back to Hermes' text prompt.
-        turn = self._active_turn.get(str(chat_id))
-        if not (turn and turn.reset):
+        user, now = str(chat_id), time.monotonic()
+        turn = self._active_turn.get(user)
+        # While another turn runs, Hermes handles /new inline (no turn of its own): find that fresh request.
+        inline = next((query_id for query_id, (conn, at) in self._resets.items()
+                       if conn.identity.user == user and now - at < 30 and not (turn and query_id in turn.ids)), None)
+        if not ((turn and turn.reset) or inline):
             return SendResult(success=False, error='Not supported')
         from tools import slash_confirm
         await slash_confirm.resolve(session_key, confirm_id, 'once')
+        if not (turn and turn.reset):
+            await self._ack_reset(inline)  # no completion hook follows an inline command
         return SendResult(success=True)
 
     # Glasses cannot show media yet (M0): Hermes' text fallbacks for it become notes after the reply.
@@ -368,14 +399,17 @@ class GlassesAdapter(BasePlatformAdapter):
         return await super().send_clarify(*args, metadata={**(metadata or {}), 'glasses_prompt': 'clarify'}, **kwargs)
 
     async def _status(self, user, state, detail=None):
-        frame = protocol.status(state, detail)
         for conn in self._targets(str(user)):
-            if conn.protocol != 1 or conn.last_status == frame:
-                continue
-            if state == 'thinking' and conn.last_status.get('state') == 'working':
-                continue  # the typing refresh must not hide the latest activity detail
-            conn.last_status = frame
-            await conn.send_json(frame)
+            await self._status_to(conn, state, detail)
+
+    async def _status_to(self, conn, state, detail=None):
+        frame = protocol.status(state, detail)
+        if conn.protocol != 1 or conn.last_status == frame or conn.ws.closed:
+            return
+        if state == 'thinking' and conn.last_status.get('state') == 'working':
+            return  # the typing refresh must not hide the latest activity detail
+        conn.last_status = frame
+        await conn.send_json(frame)
 
     async def send_typing(self, chat_id, metadata=None):
         await self._status(chat_id, 'thinking')
@@ -398,6 +432,8 @@ class GlassesAdapter(BasePlatformAdapter):
             turn.conn, turn.id, turn.reset, turn.text, turn.stream, turn.commentary, turn.notes = (
                 conn, event.message_id, reset, '', None, '', [])
             turn.ids.add(event.message_id)
+            if event.message_id in turn.arrivals:
+                turn.arrivals.remove(event.message_id)
         await self._status(user, 'thinking')
 
     async def on_processing_complete(self, event, outcome):
@@ -406,8 +442,18 @@ class GlassesAdapter(BasePlatformAdapter):
         # Follow-ups complete inside the opener's processing, before their reply is sent; only the opener's
         # completion (after Hermes' final send) ends the chain.
         if turn and turn.started and event.message_id == turn.opener:
+            # A mid-chain query that never started and is not queued was folded into this run by Hermes'
+            # interrupt: the reply answers the latest such query, on its own device.
+            folded = [q for q in turn.arrivals if q in self._queries and not self._queued(q)]
+            if folded and not turn.reset:
+                asked, turn.id, turn.conn = turn.conn, folded[-1], self._queries[folded[-1]]
+                if asked is not turn.conn:
+                    await self._status_to(asked, 'idle')
             await self._finish_query(user, turn)
             self._active_turn.pop(user, None)
+
+    def _queued(self, query_id):
+        return any(getattr(event, 'message_id', None) == query_id for event in self._pending_messages.values())
 
     async def get_chat_info(self, chat_id):
         return {'name': chat_id, 'type': 'dm'}

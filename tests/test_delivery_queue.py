@@ -1,5 +1,6 @@
 """Queue and out-of-band delivery regressions (cross-model review C3–C6), on fake sockets for determinism."""
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from gateway.platforms.event import ProcessingOutcome
@@ -230,3 +231,94 @@ async def test_media_sent_with_the_reply_is_a_note_not_the_answer(server):
     await adapter.send_image(chat_id='alice', image_url='https://example.test/map.png', metadata={'notify': True})
     await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
     assert replies(glasses) == [('A', 'Here is the map.\nhttps://example.test/map.png')]
+
+
+async def arrive(adapter, conn, query_id):
+    """A query frame reaching the adapter while a chain runs (Hermes' busy handling is stubbed)."""
+    adapter.handle_message = AsyncMock()
+    await adapter._process_query(conn, {'type': 'query', 'text': 'what is 2 plus 2', 'id': query_id})
+
+
+@pytest.mark.asyncio
+async def test_query_folded_into_the_running_turn_gets_the_reply_on_its_device(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    phone = await device(adapter, 'phone', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    await arrive(adapter, phone, 'B')  # Hermes' interrupt folds it into A's run: no hooks, not queued
+    preview = await adapter.send('alice', '4', metadata={'expect_edits': True})
+    await adapter.edit_message('alice', preview.message_id, '4', finalize=True)
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(phone) == [('B', '4')] and replies(glasses) == []
+    assert glasses.ws.frames[-1] == {'type': 'status', 'state': 'idle'}
+
+
+@pytest.mark.asyncio
+async def test_query_queued_for_later_is_not_given_the_running_turns_reply(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    phone = await device(adapter, 'phone', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    await arrive(adapter, phone, 'B')
+    adapter._pending_messages['session'] = turn_event('B')  # Hermes runs it after A
+    await adapter.send('alice', 'Answer A.', metadata={'notify': True})
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('A', 'Answer A.')] and replies(phone) == []
+
+
+@pytest.mark.asyncio
+async def test_inline_answered_command_is_not_treated_as_folded(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    await arrive(adapter, glasses, 'STATUS')
+    await adapter.send('alice', 'Working on it.', reply_to='STATUS', metadata={'notify': True})
+    await adapter.send('alice', 'Answer A.', metadata={'notify': True})
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('STATUS', 'Working on it.'), ('A', 'Answer A.')]
+
+
+@pytest.mark.asyncio
+async def test_superseded_querys_late_stream_write_does_not_replace_the_next_answer(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    a, b = started(adapter, 'A', glasses), started(adapter, 'B', glasses)
+    await adapter.on_processing_start(a)
+    await adapter.on_processing_start(b)  # A was interrupted before its stream drained
+    await adapter.send('alice', 'Correct answer B.', reply_to='B', metadata={'notify': True, 'reply_to_message_id': 'B'})
+    # Hermes drains A's interrupted stream during the outer cleanup (gateway/run_turn.py).
+    await adapter.send('alice', 'Partial A', reply_to='A', metadata={'notify': True, 'reply_to_message_id': 'A'})
+    await adapter.on_processing_complete(b, ProcessingOutcome.SUCCESS)
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('B', 'Correct answer B.')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('confirm', [True, False])
+async def test_new_session_while_a_turn_runs_resets_and_acknowledges(server, confirm):
+    adapter, _ = server
+    from tools import slash_confirm
+    glasses = await device(adapter, 'ray', flushed=True)
+    phone = await device(adapter, 'phone', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    adapter.handle_message = AsyncMock()
+    await adapter._new_session(phone)  # Hermes dispatches the busy /new inline, without processing hooks
+    reset_id = next(iter(adapter._resets))
+    choices = []
+    if confirm:
+        async def handler(choice):
+            choices.append(choice)
+            return 'New session.'
+        slash_confirm.register('session-alice', 'c9', 'new', handler)
+        assert (await adapter.send_slash_confirm('alice', 'Confirm /new', 'prompt', 'session-alice', 'c9')).success
+        assert choices == ['once']
+    else:  # approvals.destructive_slash_confirm off: the inline reply is the /new result text
+        await adapter.send('alice', 'New session.', reply_to=reset_id, metadata={'notify': True})
+    assert phone.ws.frames == [{'type': 'session_reset'}] and not adapter._resets
+    await adapter.send('alice', 'Answer A.', metadata={'notify': True})
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('A', 'Answer A.')]
