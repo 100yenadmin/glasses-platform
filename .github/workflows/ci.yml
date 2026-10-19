@@ -1,0 +1,37 @@
+name: Plugin CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        hermes: [v0.22.2, main]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.hermes }}
+          path: hermes
+      - uses: astral-sh/setup-uv@v6
+      - name: Install pinned Hermes dependencies
+        working-directory: hermes
+        run: uv sync --frozen --extra messaging --group dev
+      - name: Isolated validation and tests
+        working-directory: plugin
+        shell: bash
+        run: |
+          export HERMES_SOURCE="$GITHUB_WORKSPACE/hermes"
+          export PYTHONPATH="$HERMES_SOURCE"
+          export GLASSES_TEST_SCRATCH="$RUNNER_TEMP/glasses"
+          export HOME="$GLASSES_TEST_SCRATCH/home"
+          export HERMES_HOME="$GLASSES_TEST_SCRATCH/hermes"
+          export HERMES_GATEWAY_LOCK_DIR="$GLASSES_TEST_SCRATCH/locks"
+          export XDG_STATE_HOME="$GLASSES_TEST_SCRATCH/state"
+          export HERMES_GATEWAY_MAX_STARTS=0 HERMES_STATE_DB_GUARD_BYPASS=1 HERMES_DISABLE_LAZY_INSTALLS=1
+          mkdir -p "$HOME" "$HERMES_HOME"
+          "$HERMES_SOURCE/.venv/bin/hermes" plugins validate .
+          "$HERMES_SOURCE/.venv/bin/python" -m pytest -q tests --basetemp="$GLASSES_TEST_SCRATCH/unit"
+          GLASSES_PLATFORM_INTEGRATION=1 "$HERMES_SOURCE/.venv/bin/python" -m pytest -q -s tests/integration --basetemp="$GLASSES_TEST_SCRATCH/integration"

@@ -1,0 +1,37 @@
+name: glasses-platform
+kind: platform
+label: Smart glasses
+version: "0.1.0"
+author: 100yenadmin
+requires_hermes: ">=0.22.2"
+description: >
+  Talk to your Hermes agent through smart glasses, share camera photos, and receive reminders.
+  A hardware-independent WebSocket channel with legacy and v1 clients.
+  Disclosure — listens on a network port; device tokens grant full agent access;
+  photos are cached in the Hermes image cache.
+optional_env:
+  - name: GLASSES_DEVICES
+    description: "Device credentials: user:device=token, separated by commas"
+    prompt: "Device credentials"
+    password: true
+  - name: GLASSES_TOKEN
+    description: "Single-device token for owner:default"
+    prompt: "Single-device token"
+    password: true
+  - name: GLASSES_HOST
+    description: "Listener host (default 0.0.0.0)"
+    prompt: "Listener host"
+    password: false
+  - name: GLASSES_PORT
+    description: "Listener port (default 8765)"
+    prompt: "Listener port"
+    password: false
+  - name: GLASSES_HOME_CHANNEL
+    description: "Default user for cron and notifications"
+    prompt: "Home user"
+    password: false
+  - name: GLASSES_AUTO_CAPTURE
+    description: "Keyword capture: keywords or off"
+    prompt: "Automatic photo capture"
+    password: false
+provides_tools: [glasses_capture_photo]
