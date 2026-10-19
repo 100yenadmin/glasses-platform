@@ -217,3 +217,16 @@ async def test_failed_flush_is_retried_before_newer_pushes(server):
     assert texts(conn) == []  # held, not overtaking OLD
     await adapter._flush_outbox(conn)  # the device's next frame
     assert texts(conn) == ['OLD', 'NEW']
+
+
+@pytest.mark.asyncio
+async def test_media_sent_with_the_reply_is_a_note_not_the_answer(server):
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    a = started(adapter, 'A', glasses)
+    await adapter.on_processing_start(a)
+    await adapter.send('alice', 'Here is the map.', metadata={'notify': True})
+    # base.py _deliver_attachments: the default send_image falls back to sending the URL as text.
+    await adapter.send_image(chat_id='alice', image_url='https://example.test/map.png', metadata={'notify': True})
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('A', 'Here is the map.\nhttps://example.test/map.png')]

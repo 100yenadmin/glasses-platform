@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 ACTIVE = None
 
 
+def _as_media(metadata):
+    return {**(metadata or {}), 'glasses_media': True}
+
+
 @dataclass(eq=False)
 class Turn:
     """Reply state of one Hermes processing chain for a user. Hermes runs queued follow-up queries inside the
@@ -33,6 +37,7 @@ class Turn:
     text: str = ''  # the reply so far: the latest stream segment or final send (replies are never chunked)
     stream: str | None = None  # message id of the live stream segment
     commentary: str = ''  # the latest interim commentary, the reply when Hermes delivered the answer that way
+    notes: list = field(default_factory=list)  # media Hermes sent with the reply (text fallbacks), shown after it
     ids: set = field(default_factory=set)
 
     def __post_init__(self):
@@ -287,6 +292,8 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._deliver_reply(user, self._queries[reply_to], reply_to, content)
         elif turn is None or origin is not None:
             return await self._push(user, content, origin or 'message', message_id)
+        elif metadata.get('glasses_media'):
+            turn.notes.append(content)  # a media fallback follows the reply; it never replaces it
         elif metadata.get('expect_edits') and not metadata.get('_interim_send'):
             turn.text, turn.stream = content, message_id  # a new stream segment: the reply is the last one
             await self._reply_delta(user, turn)
@@ -323,8 +330,9 @@ class GlassesAdapter(BasePlatformAdapter):
         if turn.reset:  # v0 contract: new_session is answered by session_reset alone
             if turn.conn in self.registry.live(user):
                 await turn.conn.send_json(protocol.session_reset())
-        elif turn.text or turn.commentary:
-            await self._deliver_reply(user, turn.conn, turn.id, turn.text or turn.commentary)
+        elif turn.text or turn.commentary or turn.notes:
+            text = '\n'.join([turn.text or turn.commentary, *turn.notes]).strip()
+            await self._deliver_reply(user, turn.conn, turn.id, text)
         await self._status(user, 'idle')
 
     async def send_slash_confirm(self, chat_id, title, message, session_key, confirm_id, metadata=None):
@@ -336,6 +344,25 @@ class GlassesAdapter(BasePlatformAdapter):
         from tools import slash_confirm
         await slash_confirm.resolve(session_key, confirm_id, 'once')
         return SendResult(success=True)
+
+    # Glasses cannot show media yet (M0): Hermes' text fallbacks for it become notes after the reply.
+    async def send_image(self, *args, metadata=None, **kwargs):
+        return await super().send_image(*args, metadata=_as_media(metadata), **kwargs)
+
+    async def send_multiple_images(self, *args, metadata=None, **kwargs):
+        return await super().send_multiple_images(*args, metadata=_as_media(metadata), **kwargs)
+
+    async def send_image_file(self, *args, metadata=None, **kwargs):
+        return await super().send_image_file(*args, metadata=_as_media(metadata), **kwargs)
+
+    async def send_voice(self, *args, metadata=None, **kwargs):
+        return await super().send_voice(*args, metadata=_as_media(metadata), **kwargs)
+
+    async def send_video(self, *args, metadata=None, **kwargs):
+        return await super().send_video(*args, metadata=_as_media(metadata), **kwargs)
+
+    async def send_document(self, *args, metadata=None, **kwargs):
+        return await super().send_document(*args, metadata=_as_media(metadata), **kwargs)
 
     async def send_clarify(self, *args, metadata=None, **kwargs):
         return await super().send_clarify(*args, metadata={**(metadata or {}), 'glasses_prompt': 'clarify'}, **kwargs)
@@ -368,8 +395,8 @@ class GlassesAdapter(BasePlatformAdapter):
         elif conn and event.message_id != turn.id:
             # A queued follow-up runs inside the opener's processing: the previous query is answered first.
             await self._finish_query(user, turn)
-            turn.conn, turn.id, turn.reset, turn.text, turn.stream, turn.commentary = (
-                conn, event.message_id, reset, '', None, '')
+            turn.conn, turn.id, turn.reset, turn.text, turn.stream, turn.commentary, turn.notes = (
+                conn, event.message_id, reset, '', None, '', [])
             turn.ids.add(event.message_id)
         await self._status(user, 'thinking')
 
