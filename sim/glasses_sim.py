@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import textwrap
 from uuid import uuid4
 
 import aiohttp
@@ -26,6 +27,27 @@ def elide(frame):
 def log_frame(direction, frame):
     print(json.dumps({'t': datetime.now(timezone.utc).isoformat(), 'dir': direction,
                       'frame': elide(frame)}), flush=True)
+
+
+def pretty_frame(direction, frame):
+    """A readable transcript of the same frames, for people watching (status and stream frames are left out)."""
+    kind, text = frame.get('type'), frame.get('text') or frame.get('message') or ''
+    if direction == 'out':
+        line = {'query': ('you', text),
+                'photo': ('glasses', f'photo sent ({len(frame.get("data", "")) * 3 // 4 // 1024} KB)'),
+                'photo_error': ('glasses', 'no photo: ' + text),
+                'new_session': ('you', 'new session')}.get(kind)
+    else:
+        line = {'capture_photo': ('hermes', 'asks the glasses for a photo'),
+                'response': ('hermes', text),
+                'push': ('hermes', f'[{frame.get("origin", "push")}] {text}'),
+                'session_reset': ('hermes', 'new session started'),
+                'error': ('hermes', 'error: ' + text)}.get(kind)
+    if line:
+        who, said = line
+        prefix = f'{datetime.now().strftime("%H:%M:%S")}  {who:<8} '
+        print(textwrap.fill(' '.join(said.split()), width=100, initial_indent=prefix,
+                            subsequent_indent=' ' * len(prefix)), flush=True)
 
 
 async def run(url='ws://127.0.0.1:8765/voice', token='', legacy=False, device='sim',
@@ -116,7 +138,10 @@ def main():
     parser.add_argument('--new-session', action='store_true')
     parser.add_argument('--wait-push', type=float, default=0)
     parser.add_argument('--timeout', type=float, default=120)
-    raise SystemExit(asyncio.run(run(**vars(parser.parse_args()))))
+    parser.add_argument('--pretty', action='store_true', help='print a readable transcript instead of JSON lines')
+    args = vars(parser.parse_args())
+    emit = pretty_frame if args.pop('pretty') else log_frame
+    raise SystemExit(asyncio.run(run(**args, emit=emit)))
 
 
 if __name__ == '__main__':
