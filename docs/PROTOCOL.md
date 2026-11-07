@@ -100,7 +100,11 @@ to a device that declared `camera:false`.
   default `interrupt` mode, folded into the running turn. A folded query gets the turn's reply, with its own turn
   id, on its own device; the interrupted query then gets no reply of its own (its device gets `status idle`).
   A command Hermes answers at once (`/stop`, `/status`) gets its own reply, and `new_session` always ends with
-  `session_reset`. Replies are never split into several messages.
+  `session_reset`, sent once Hermes has actually run `/new`. Right after a gateway restart Hermes may hold
+  messages for a moment; wait for `session_reset` (or `error`, if Hermes could not start a new session) before
+  sending the next `query`. Replies are never split into several messages.
+- A cron push carries the job's own text. Hermes's header (job name and id) and footer (how to stop the job) are
+  removed, because devices read pushes aloud.
 - A device that is connected but has not settled its protocol holds new pushes until it does. If no device is live,
   the server queues pushes (50 items, 24 h) and delivers them in order on the next connect. In M0 the queue is lost
   on server restart.

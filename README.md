@@ -5,7 +5,7 @@
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.1.0 preview (milestone M0).** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.1.1 preview (milestone M0).** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
@@ -70,6 +70,10 @@ The plugin refuses to start without at least one token. It listens on `0.0.0.0:8
 To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. The plugin does not terminate TLS.
 
 ## Try it
+
+**A demo gateway:** `demo/run_demo_gateway.sh <empty-dir>` starts an isolated Hermes gateway with this plugin, a
+generated device token and only the vision, glasses, cronjob and memory toolsets (it uses the z.ai GLM coding plan;
+see the script's header).
 
 **With the simulator:**
 
