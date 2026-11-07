@@ -77,7 +77,7 @@ async def run(url='ws://127.0.0.1:8765/voice', token='', legacy=False, device='s
                     await on_ready()
                 if new_session:
                     await send({'type': 'new_session'})
-                    while (await receive()).get('type') != 'session_reset':
+                    while (await receive()).get('type') not in ('session_reset', 'error'):
                         pass
                 for text in say:
                     turn = uuid4().hex

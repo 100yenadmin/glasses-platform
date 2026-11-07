@@ -41,12 +41,26 @@ DEICTIC_STOP_NOUNS = {
     "will", "would", "can", "could", "should", "might", "may", "must",
     "does", "did", "done", "has", "had", "have", "gets", "got", "goes",
     "went", "seems", "means", "works", "sounds", "feels", "happened",
-    # Pronouns, possessives and articles: "remember that my gate is 42", "I think that the bus left" use
-    # "that" as a conjunction, not to point at anything
-    "i", "you", "he", "she", "it", "we", "they", "me", "him", "us", "them",
-    "my", "your", "his", "her", "its", "our", "their", "the", "a", "an",
-    "there", "here",
 }
+
+
+# "Remember that my gate is 42", "I think that the bus left": "that" followed by a pronoun, possessive or article
+# is a conjunction, not a pointer. After a copula or question word it still points ("is that the bus?").
+CONJUNCTION_FOLLOWERS = {
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "us", "them",
+    "my", "your", "his", "her", "its", "our", "their", "the", "a", "an", "there", "here",
+}
+POINTING_BEFORE_THAT = {
+    "is", "was", "are", "were", "isn't", "wasn't", "what", "what's", "whats", "who", "who's", "where", "where's",
+    "which", "how", "see", "at", "about", "like", "from", "of", "in", "on", "to", "with",
+}
+
+
+def _conjunction_that(text, match):
+    if match.group(1).lower() != "that" or (match.group(2) or "").lower() not in CONJUNCTION_FOLLOWERS:
+        return False
+    before = re.findall(r"[a-z']+", text[:match.start()].lower())
+    return not (before and before[-1] in POINTING_BEFORE_THAT)
 
 
 # Deictic follow-up captures only when no photo was taken within this many
@@ -66,6 +80,8 @@ def should_capture_photo(text: str, last_photo_at: float, now: float) -> bool:
     if is_visual_query(text):
         return True
     for match in DEICTIC_RE.finditer(text):
+        if match.group(1) and _conjunction_that(text, match):
+            continue
         noun = (match.group(2) or "").lower()
         if match.group(0).lower() == "the one" or (
             noun and noun not in DEICTIC_STOP_NOUNS

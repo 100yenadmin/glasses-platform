@@ -103,24 +103,82 @@ async def test_only_cron_deliveries_are_unwrapped(server):
 
 def test_that_as_a_conjunction_takes_no_photo():
     for text in ('Remember that my gate is 42.', 'I think that the bus left.', 'Tell her that we are late.',
-                 'Is this it?', 'So that you know.'):
+                 'So that you know.'):
         assert not should_capture_photo(text, 0, 1000), text
-    for text in ('What is that building?', 'How old is this bridge?', 'that one, please'):
+    for text in ('What is that building?', 'How old is this bridge?', 'that one, please', 'Is this a real Rolex?',
+                 'Is that the bus to the airport?', 'Is this my gate?', 'Is that an owl?', 'Is that her car?',
+                 "What's that the sign says?", 'Is this an allergen?'):
         assert should_capture_photo(text, 0, 1000), text
 
 
+async def reset_event(adapter, conn):
+    adapter.handle_message = AsyncMock()
+    await adapter._new_session(conn)
+    return adapter.handle_message.call_args.args[0]
+
+
 @pytest.mark.asyncio
-async def test_a_chained_new_session_needs_its_own_run(server):
+@pytest.mark.parametrize('outcome', [ProcessingOutcome.FAILURE, ProcessingOutcome.CANCELLED])
+async def test_a_failed_or_cancelled_new_session_is_answered_with_an_error(server, outcome):
     adapter, _ = server
     glasses = await device(adapter)
-    adapter.handle_message = AsyncMock()
-    await adapter._process_query(glasses, {'type': 'query', 'text': 'hi', 'id': 'q1'})
-    opener = adapter.handle_message.call_args.args[0]
-    await adapter.on_processing_start(opener)
-    await adapter.send('alice', 'Hi.', metadata={'notify': True})
-    await adapter._new_session(glasses)
-    reset = adapter.handle_message.call_args.args[0]
-    await adapter.on_processing_start(reset)  # the chain moves on: the opener is answered
-    await adapter.on_processing_complete(opener, ProcessingOutcome.SUCCESS)  # the /new produced nothing
-    assert glasses.ws.frames == [{'type': 'response', 'text': 'Hi.', 'tts': False}]
-    assert reset.message_id in adapter._resets
+    event = await reset_event(adapter, glasses)
+    await adapter.on_processing_start(event)
+    await adapter.on_processing_complete(event, outcome)
+    assert kinds(glasses) == ['error'] and not adapter._resets
+
+
+@pytest.mark.asyncio
+async def test_session_reset_reaches_the_device_after_it_reconnects(server):
+    adapter, _ = server
+    from tools import slash_confirm
+    old = await device(adapter)
+    event = await reset_event(adapter, old)
+    await adapter.on_processing_start(event)
+    old.ws.closed = True
+    new = await device(adapter)
+
+    async def handler(choice):
+        return 'New session.'
+    slash_confirm.register('session-alice', 'c2', 'new', handler)
+    assert (await adapter.send_slash_confirm('alice', '/new', 'prompt', 'session-alice', 'c2')).success
+    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+    assert new.ws.frames == [{'type': 'session_reset'}] and old.ws.frames == []
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_new_session_never_confirms_another_command(server):
+    adapter, _ = server
+    from tools import slash_confirm
+    glasses = await device(adapter)
+    event = await reset_event(adapter, glasses)
+    await adapter.on_processing_start(event)
+    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)  # queued at startup: entry kept
+    choices = []
+
+    async def handler(choice):
+        choices.append(choice)
+    slash_confirm.register('session-alice', 'c3', 'undo', handler)
+    result = await adapter.send_slash_confirm('alice', '/undo', 'prompt', 'session-alice', 'c3')
+    assert not result.success and choices == [] and glasses.ws.frames == []
+
+
+@pytest.mark.asyncio
+async def test_a_busy_notice_for_another_query_does_not_count_as_the_reset_running(server):
+    adapter, _ = server
+    glasses = await device(adapter)
+    event = await reset_event(adapter, glasses)
+    await adapter.on_processing_start(event)
+    await adapter.send('alice', 'Still working on your last message.', reply_to='another-query')
+    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+    assert glasses.ws.frames == [] and event.message_id in adapter._resets
+
+
+@pytest.mark.asyncio
+async def test_a_media_only_cron_job_is_announced_by_name(server):
+    adapter, _ = server
+    glasses = await device(adapter, protocol=1)
+    media_only = ('Cronjob Response: Morning photo\n(job_id: j9)\n-------------\n\n'
+                  'To stop or manage this job, send me a new message (e.g. "stop reminder Morning photo").')
+    await adapter.send('alice', media_only, metadata={'job_id': 'j9'})
+    assert [frame['text'] for frame in glasses.ws.frames] == ['Morning photo']
