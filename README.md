@@ -1,5 +1,7 @@
 # glasses-platform
 
+![Glasses Platform: your own Hermes agent, on your glasses](docs/media/banner.png)
+
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
