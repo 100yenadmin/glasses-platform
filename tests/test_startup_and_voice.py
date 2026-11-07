@@ -107,3 +107,20 @@ def test_that_as_a_conjunction_takes_no_photo():
         assert not should_capture_photo(text, 0, 1000), text
     for text in ('What is that building?', 'How old is this bridge?', 'that one, please'):
         assert should_capture_photo(text, 0, 1000), text
+
+
+@pytest.mark.asyncio
+async def test_a_chained_new_session_needs_its_own_run(server):
+    adapter, _ = server
+    glasses = await device(adapter)
+    adapter.handle_message = AsyncMock()
+    await adapter._process_query(glasses, {'type': 'query', 'text': 'hi', 'id': 'q1'})
+    opener = adapter.handle_message.call_args.args[0]
+    await adapter.on_processing_start(opener)
+    await adapter.send('alice', 'Hi.', metadata={'notify': True})
+    await adapter._new_session(glasses)
+    reset = adapter.handle_message.call_args.args[0]
+    await adapter.on_processing_start(reset)  # the chain moves on: the opener is answered
+    await adapter.on_processing_complete(opener, ProcessingOutcome.SUCCESS)  # the /new produced nothing
+    assert glasses.ws.frames == [{'type': 'response', 'text': 'Hi.', 'tts': False}]
+    assert reset.message_id in adapter._resets
