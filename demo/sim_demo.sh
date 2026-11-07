@@ -25,6 +25,6 @@ echo
 sim --new-session --timeout 240 --photo "$SIGN" \
   --say "Hermes, what am I looking at?" \
   --say "Remind me in one minute to call Sam about gate 42." \
-  --say "Remember my gate is 42." || exit $?
+  --say "Save to memory: my gate is 42." || exit $?
 echo
 sim --new-session --timeout 120 --wait-push 180 --say "What's my gate?" || true  # ends when the reminder lands
