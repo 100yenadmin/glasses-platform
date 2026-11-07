@@ -52,6 +52,8 @@ streaming:
   enabled: true
 updates:
   check: false
+sessions:
+  auto_prune: false  # answers Hermes's one-time disk-space question, so it is never sent to the device
 cron:
   preflight: false
 platform_toolsets:
