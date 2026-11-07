@@ -6,7 +6,7 @@
 #   HERMES_SOURCE=<hermes-agent checkout with .venv> demo/sim_demo.sh <demo-dir> [ws://127.0.0.1:8765/voice]
 #
 # Beats: a photo question (the simulator answers the camera request with the sign image in docs/evidence/),
-# a one-minute reminder, a memory, a new session that recalls it, and the reminder arriving on its own.
+# a one-minute reminder (DEMO_REMINDER overrides its wording), a memory, a new session that recalls it, and the reminder arriving on its own.
 set -uo pipefail
 
 DEMO="${1:?usage: demo/sim_demo.sh <demo-dir> [ws-url]}"
@@ -24,7 +24,7 @@ echo "glasses simulator  <->  Hermes gateway (glasses platform)"
 echo
 sim --new-session --timeout 240 --photo "$SIGN" \
   --say "Hermes, what am I looking at?" \
-  --say "Remind me in one minute to call Sam about gate 42." \
+  --say "${DEMO_REMINDER:-Remind me in one minute to call Sam about gate 42.}" \
   --say "Save to memory: my gate is 42." || exit $?
 echo
 sim --new-session --timeout 120 --wait-push 180 --say "What's my gate?" || true  # ends when the reminder lands
