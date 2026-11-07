@@ -3,6 +3,7 @@ import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 import logging
+import re
 import time
 from uuid import uuid4
 
@@ -25,6 +26,18 @@ def _as_media(metadata):
     return {**(metadata or {}), 'glasses_media': True}
 
 
+# Hermes wraps cron deliveries in a header (job name and id) and a footer (how to stop the job). Read aloud on
+# glasses that is noise: the wearer hears the job's own words, and the push frame says it came from cron.
+_CRON_WRAPPER = re.compile(
+    r'\ACronjob Response: [^\n]*\n\(job_id: [^)\n]*\)\n-+\n\n(?P<body>.*)\n\n'
+    r'To stop or manage this job, send me a new message [^\n]*\Z', re.S)
+
+
+def _unwrap_cron(content):
+    match = _CRON_WRAPPER.match(content) if isinstance(content, str) else None
+    return match.group('body').strip() if match and match.group('body').strip() else content
+
+
 @dataclass(eq=False)
 class Turn:
     """Reply state of one Hermes processing chain for a user. Hermes runs queued follow-up queries inside the
@@ -33,6 +46,7 @@ class Turn:
     id: str  # the query being answered now
     reset: bool = False  # the device's own new_session: answers Hermes' /new confirm, ends with session_reset
     started: bool = False  # Hermes began processing the opener (on_processing_start)
+    ran: bool = False  # Hermes sent, edited or confirmed something for this query (not just queued it)
     opener: str = ''  # the query that opened the chain; its completion ends the chain
     text: str = ''  # the reply so far: the latest stream segment or final send (replies are never chunked)
     stream: str | None = None  # message id of the live stream segment
@@ -301,6 +315,8 @@ class GlassesAdapter(BasePlatformAdapter):
         if metadata.get('is_approval_prompt') or metadata.get('glasses_prompt'):
             return await self._push(user, content, metadata.get('glasses_prompt') or 'approval', message_id)
         origin = metadata.get('origin') or ('cron' if metadata.get('job_id') else None)
+        if origin == 'cron':
+            content = _unwrap_cron(content)
         turn = self._active_turn.get(user)
         final = metadata.get('notify') and not metadata.get('_interim_send')
         owner = metadata.get('reply_to_message_id')  # stream-consumer writes name the query they belong to
@@ -316,23 +332,27 @@ class GlassesAdapter(BasePlatformAdapter):
             return await self._push(user, content, origin or 'message', message_id)
         elif owner and owner in turn.ids and owner != turn.id:
             await self._status(user, 'working', content)  # a superseded query's late stream write
-        elif metadata.get('glasses_media'):
-            turn.notes.append(content)  # a media fallback follows the reply; it never replaces it
-        elif metadata.get('expect_edits') and not metadata.get('_interim_send'):
-            turn.text, turn.stream = content, message_id  # a new stream segment: the reply is the last one
-            await self._reply_delta(user, turn)
-        elif final:
-            turn.text, turn.stream = content, None
         else:
-            # Tool progress, commentary, busy and long-running notices: status detail only, never a reply.
-            if metadata.get('_interim_send'):
-                turn.commentary = content
-            await self._status(user, 'working', content)
+            turn.ran = True
+            if metadata.get('glasses_media'):
+                turn.notes.append(content)  # a media fallback follows the reply; it never replaces it
+            elif metadata.get('expect_edits') and not metadata.get('_interim_send'):
+                turn.text, turn.stream = content, message_id  # a new stream segment: the reply is the last one
+                await self._reply_delta(user, turn)
+            elif final:
+                turn.text, turn.stream = content, None
+            else:
+                # Tool progress, commentary, busy and long-running notices: status detail only, never a reply.
+                if metadata.get('_interim_send'):
+                    turn.commentary = content
+                await self._status(user, 'working', content)
         return SendResult(success=True, message_id=message_id)
 
     async def edit_message(self, chat_id, message_id, content, *, finalize=False):
         user = str(chat_id)
         turn = self._active_turn.get(user)
+        if turn:
+            turn.ran = True
         if turn and message_id == turn.stream:
             turn.text = content
             await self._reply_delta(user, turn)
@@ -352,9 +372,13 @@ class GlassesAdapter(BasePlatformAdapter):
     async def _finish_query(self, user, turn):
         """Answer the query the chain is on, exactly once."""
         if turn.reset:  # v0 contract: new_session is answered by session_reset alone
-            self._resets.pop(turn.id, None)
-            if turn.conn in self.registry.live(user):
-                await turn.conn.send_json(protocol.session_reset())
+            # Only once Hermes ran the /new: during gateway startup it queues the event (processing hooks still
+            # fire, with nothing run) and replays it later, so an early session_reset would let the device's
+            # next query race the real reset.
+            if turn.ran:
+                self._resets.pop(turn.id, None)
+                if turn.conn in self.registry.live(user):
+                    await turn.conn.send_json(protocol.session_reset())
         elif turn.text or turn.commentary or turn.notes:
             text = '\n'.join([turn.text or turn.commentary, *turn.notes]).strip()
             await self._deliver_reply(user, turn.conn, turn.id, text)
@@ -372,7 +396,9 @@ class GlassesAdapter(BasePlatformAdapter):
             return SendResult(success=False, error='Not supported')
         from tools import slash_confirm
         await slash_confirm.resolve(session_key, confirm_id, 'once')
-        if not (turn and turn.reset):
+        if turn and turn.reset:
+            turn.ran = True
+        else:
             await self._ack_reset(inline)  # no completion hook follows an inline command
         return SendResult(success=True)
 
@@ -429,8 +455,8 @@ class GlassesAdapter(BasePlatformAdapter):
         elif conn and event.message_id != turn.id:
             # A queued follow-up runs inside the opener's processing: the previous query is answered first.
             await self._finish_query(user, turn)
-            turn.conn, turn.id, turn.reset, turn.text, turn.stream, turn.commentary, turn.notes = (
-                conn, event.message_id, reset, '', None, '', [])
+            turn.conn, turn.id, turn.reset, turn.ran, turn.text, turn.stream, turn.commentary, turn.notes = (
+                conn, event.message_id, reset, False, '', None, '', [])
             turn.ids.add(event.message_id)
             if event.message_id in turn.arrivals:
                 turn.arrivals.remove(event.message_id)

@@ -41,6 +41,11 @@ DEICTIC_STOP_NOUNS = {
     "will", "would", "can", "could", "should", "might", "may", "must",
     "does", "did", "done", "has", "had", "have", "gets", "got", "goes",
     "went", "seems", "means", "works", "sounds", "feels", "happened",
+    # Pronouns, possessives and articles: "remember that my gate is 42", "I think that the bus left" use
+    # "that" as a conjunction, not to point at anything
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "us", "them",
+    "my", "your", "his", "her", "its", "our", "their", "the", "a", "an",
+    "there", "here",
 }
 
 
