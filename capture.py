@@ -59,7 +59,7 @@ POINTING_BEFORE_THAT = {
 def _conjunction_that(text, match):
     if match.group(1).lower() != "that" or (match.group(2) or "").lower() not in CONJUNCTION_FOLLOWERS:
         return False
-    before = re.findall(r"[a-z']+", text[:match.start()].lower())
+    before = re.findall(r"[a-z']+", text[:match.start()].lower().replace("\u2019", "'"))  # speech-to-text writes ’
     return not (before and before[-1] in POINTING_BEFORE_THAT)
 
 

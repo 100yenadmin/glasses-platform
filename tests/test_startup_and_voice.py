@@ -107,7 +107,7 @@ def test_that_as_a_conjunction_takes_no_photo():
         assert not should_capture_photo(text, 0, 1000), text
     for text in ('What is that building?', 'How old is this bridge?', 'that one, please', 'Is this a real Rolex?',
                  'Is that the bus to the airport?', 'Is this my gate?', 'Is that an owl?', 'Is that her car?',
-                 "What's that the sign says?", 'Is this an allergen?'):
+                 "What's that the sign says?", 'Is this an allergen?', 'What\u2019s that a picture of?'):
         assert should_capture_photo(text, 0, 1000), text
 
 
