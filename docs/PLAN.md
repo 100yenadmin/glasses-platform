@@ -92,7 +92,7 @@ Details are in [PROTOCOL.md](PROTOCOL.md).
 
 **D4. One session per person, shared across that person's devices.**
 - Each token maps to `user:device`.
-- `chat_id = user_id = <user>`, so Ray-Ban, G2 and phone share one conversation and memory.
+- `chat_id = user_id = <user>`, so Ray-Ban, G2 and phone use the same conversation and memory.
 - A turn's reply goes to the device that asked.
 - Pushes fan out to all of the user's live devices.
 

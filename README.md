@@ -40,7 +40,7 @@ hermes plugins install https://github.com/100yenadmin/glasses-platform --enable
 
 ## Configure
 
-Give each device its own token. Tokens map to `user:device`, and all devices of one user share one conversation.
+Give each device its own token. Tokens map to `user:device`, and all devices of one user use the same conversation.
 Put this in `~/.hermes/.env`:
 
 ```bash
