@@ -52,6 +52,8 @@ streaming:
   enabled: true
 updates:
   check: false
+onboarding:
+  profile_build: "off"  # no first-contact profile offer appended to the first answer
 sessions:
   auto_prune: false  # answers Hermes's one-time disk-space question, so it is never sent to the device
 cron:
