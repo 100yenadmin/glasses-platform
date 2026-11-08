@@ -157,3 +157,71 @@ async def test_a_push_follows_the_answer_even_while_the_chain_runs_on(hermes):
     assert await responses(glasses, 2) == ['It is noon.', 'Reminder: check your gate.']
     await answer(adapter, first, 'Second answer.')
     await glasses.close(); await phone.close()
+
+
+@pytest.mark.asyncio
+async def test_a_query_only_queued_at_startup_still_holds_pushes_until_its_replay_answers(hermes):
+    adapter, client, events = hermes
+    glasses = await opened(client, version=0)
+    event = await ask(glasses, events, 'q1')
+    # Hermes' startup-restore gate: the hooks fire around a pass that only queues the event (outcome SUCCESS).
+    await adapter.on_processing_start(event)
+    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+    await adapter.send('alice', 'Reminder: check your gate.', metadata={'job_id': 'j1'})
+    await quiet(glasses)  # the device still waits: held
+    event._hermes_startup_restore_replay = True
+    await adapter.on_processing_start(event)
+    await answer(adapter, event, 'It is noon.')
+    assert await responses(glasses, 2) == ['It is noon.', 'Reminder: check your gate.']
+    await glasses.close()
+
+
+@pytest.mark.asyncio
+async def test_every_folded_query_is_settled_when_the_chain_ends(hermes):
+    adapter, client, events = hermes
+    glasses = await opened(client, version=0)
+    first = await ask(glasses, events, 'q1')
+    await adapter.on_processing_start(first)
+    await ask(glasses, events, 'q2')  # interrupt mode: folded into the running turn
+    await ask(glasses, events, 'q3')  # folded again; the reply answers this one
+    await answer(adapter, first, 'Here you go.')
+    assert await responses(glasses, 1) == ['Here you go.']
+    await adapter.send('alice', 'Reminder: check your gate.', metadata={'job_id': 'j1'})
+    await glasses.send_json({'type': 'ping'})
+    assert (await glasses.receive_json())['text'] == 'Reminder: check your gate.'  # at once: nothing is still asked
+    await glasses.close()
+
+
+@pytest.mark.asyncio
+async def test_a_new_push_never_overtakes_a_held_one(hermes):
+    adapter, client, events = hermes
+    adapter._hold_seconds = 0.3
+    glasses = await opened(client, version=0)
+    event = await ask(glasses, events, 'q1')
+    await adapter.on_processing_start(event)
+    await asyncio.sleep(0.2)
+    await adapter.send('alice', 'First.', metadata={'job_id': 'j1'})  # held; its own timer is due at 0.5 s
+    await asyncio.sleep(0.15)  # the question went stale at 0.3 s
+    await adapter.send('alice', 'Second.', metadata={'job_id': 'j2'})
+    await glasses.send_json({'type': 'ping'})
+    assert [(await glasses.receive_json())['text'] for _ in range(2)] == ['First.', 'Second.']  # both at once, in order
+    await glasses.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_release_keeps_the_unsent_pushes(hermes):
+    adapter, client, events = hermes
+    glasses = await opened(client, version=0)
+    event = await ask(glasses, events, 'q1')
+    await adapter.on_processing_start(event)
+    await adapter.send('alice', 'Reminder: check your gate.', metadata={'job_id': 'j1'})
+    conn = adapter.registry.live('alice')[0]
+    assert len(conn.held) == 1
+
+    async def cancelled(frame):
+        raise asyncio.CancelledError
+    conn.send_json = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await adapter._release_held(conn)
+    assert [item[1] for item in adapter.outbox.drain('alice')] == ['Reminder: check your gate.']
+    await glasses.close()

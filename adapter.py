@@ -338,8 +338,9 @@ class GlassesAdapter(BasePlatformAdapter):
         return bool(conn.asking)
 
     def _holds(self, conn, origin):
-        # v0 has no push frame: a push sent while the device waits would be taken as its answer.
-        return conn.protocol == 0 and origin not in PROMPT_ORIGINS and self._waiting(conn)
+        # v0 has no push frame: a push sent while the device waits would be taken as its answer. Once pushes are
+        # held, later ones queue behind them so the device still hears them in order.
+        return conn.protocol == 0 and origin not in PROMPT_ORIGINS and (bool(conn.held) or self._waiting(conn))
 
     def _hold(self, conn, item):
         conn.held.append(item)
@@ -351,18 +352,26 @@ class GlassesAdapter(BasePlatformAdapter):
         await self._release_held(conn)
 
     async def _release_held(self, conn):
+        async with self._lock(conn.identity.user):
+            await self._send_held(conn)
+
+    async def _send_held(self, conn):
+        """Send the held pushes in order. The caller holds the user's lock."""
         user = conn.identity.user
-        async with self._lock(user):
-            task, conn.held_task = conn.held_task, None
-            if task is not None and task is not asyncio.current_task():
-                task.cancel()
-            items, conn.held = conn.held, []
-            for index, (_, text, origin, message_id) in enumerate(items):
+        task, conn.held_task = conn.held_task, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+        items, conn.held, sent = conn.held, [], 0
+        try:
+            for _, text, origin, message_id in items:
                 if not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
-                    delivered = self._delivered.get(user, ())
-                    self.outbox.merge(user, [item for item in items[index:] if item[3] not in delivered])
-                    return
+                    break
                 self._mark_delivered(user, message_id)
+                sent += 1
+        finally:
+            if sent < len(items):  # closed or cancelled: the rest waits for the next connection
+                delivered = self._delivered.get(user, ())
+                self.outbox.merge(user, [item for item in items[sent:] if item[3] not in delivered])
 
     async def _answered(self, conn, query_id):
         """The device got its answer (or its error): pushes held behind it follow now."""
@@ -390,6 +399,8 @@ class GlassesAdapter(BasePlatformAdapter):
                     reached = True
                 elif self._holds(conn, origin):
                     self._hold(conn, (time.time(), content, origin, message_id))
+                    if not self._waiting(conn):  # its question went stale: the older held pushes go first, now
+                        await self._send_held(conn)
                     reached = True
                 elif await conn.send_json(protocol.push(conn.protocol, content, origin, message_id)):
                     self._mark_delivered(user, message_id)
@@ -580,7 +591,9 @@ class GlassesAdapter(BasePlatformAdapter):
                     await self._status_to(asked, 'idle')
             await self._finish_query(user, turn)
             self._active_turn.pop(user, None)
-            await self._settle(user, {*turn.ids, turn.id})
+            # Not for a pass that only queued the query (Hermes' startup-restore gate): it replays and answers later.
+            if turn.ran or turn.failed:
+                await self._settle(user, {*turn.ids, turn.id, *folded})
 
     def _queued(self, query_id):
         return any(getattr(event, 'message_id', None) == query_id for event in self._pending_messages.values())
