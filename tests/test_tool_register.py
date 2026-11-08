@@ -45,6 +45,7 @@ async def test_tool_contract(monkeypatch):
 @pytest.mark.asyncio
 async def test_tool_cross_thread_capture(server):
     active, client = server
+    active._photo_timeout = 5  # the fixture's 0.1 s is for timeout tests; a slow CI runner needs longer here
     from glasses_plugin.tests.test_adapter import opened, until
     ws = await opened(client)
     task = asyncio.create_task(asyncio.to_thread(lambda: asyncio.run(active.capture_for_session('alice'))))

@@ -71,6 +71,7 @@ async def test_offline_flush(server):
 @pytest.mark.parametrize('version', [0, 1])
 async def test_photo_read_loop_and_event(server, version):
     adapter, client = server
+    adapter._photo_timeout = 5  # the fixture's 0.1 s is for timeout tests; a slow CI runner needs longer here
     events = asyncio.Queue()
     adapter.handle_message = AsyncMock(side_effect=events.put)
     ws = await opened(client, version=version)
