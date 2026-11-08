@@ -96,6 +96,11 @@ to a device that declared `camera:false`.
   frames. If that device went offline, the reply goes out as a `push` with origin `reply`.
 - Pushes, approval prompts and clarify questions go to every live device of the same user (v0 gets them as
   `response`) and never to another user. Answer a prompt with an ordinary `query`, for example `/approve`.
+- v0 has no `push` frame, so a push sent while a v0 device waits for its answer would look like that answer. While
+  a v0 device has a `query` or `new_session` in flight, pushes to it wait until its answer (`response`, `error` or
+  `session_reset`) has gone out, then follow in order. They wait 120 s at most (`GLASSES_PUSH_HOLD_SECONDS`).
+  Approval prompts and clarify questions are never held, because the turn is waiting for them. v1 devices get
+  pushes at once.
 - A query sent while another is running is either queued (answered after it, on its own device) or, in Hermes'
   default `interrupt` mode, folded into the running turn. A folded query gets the turn's reply, with its own turn
   id, on its own device; the interrupted query then gets no reply of its own (its device gets `status idle`).
