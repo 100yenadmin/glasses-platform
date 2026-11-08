@@ -24,7 +24,7 @@ echo "glasses simulator  <->  Hermes gateway (glasses platform)"
 echo
 sim --new-session --timeout 240 --photo "$SIGN" \
   --say "Hermes, what am I looking at?" \
-  --say "${DEMO_REMINDER:-Remind me in one minute to call Sam about gate 42.}" \
+  --say "${DEMO_REMINDER:-Remind me in one minute to check my gate.}" \
   --say "Save to memory: my gate is 42." || exit $?
 echo
 sim --new-session --timeout 120 --wait-push 180 --say "What's my gate?" || true  # ends when the reminder lands
