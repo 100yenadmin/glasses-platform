@@ -12,7 +12,6 @@ from gateway.config import HomeChannel, Platform
 from gateway.platforms._shared import extra_or_secret
 from gateway.platforms.base import BasePlatformAdapter, SendResult, cache_image_from_bytes_async
 from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
-from gateway.platforms.shared_ingress import bind_listener
 
 from . import protocol
 from .capture import PhotoBroker, decode_photo, should_capture_photo
@@ -108,8 +107,17 @@ class GlassesAdapter(BasePlatformAdapter):
         self._app = web.Application(client_max_size=int(self._max_frame_mb * 1024 * 1024))
         self._app.router.add_get(self._path, self._websocket)
         self._app.router.add_get('/health', self._health)
+        # Public aiohttp calls, not Hermes' private shared_ingress.bind_listener: glasses is not one of Hermes'
+        # port-binding platforms, so its shared-listener mode never applies and the bind is the same.
         # Query credentials must never reach aiohttp's access log.
-        self._runner = await bind_listener(self, self._app, self._host, self._port, self._path, access_log=None)
+        runner = web.AppRunner(self._app, access_log=None)
+        await runner.setup()
+        try:
+            await web.TCPSite(runner, self._host, self._port).start()
+        except BaseException:
+            await runner.cleanup()
+            raise
+        self._runner = runner
         self._mark_connected()
         self._wire_plugin_handlers(None)
         ACTIVE = self
