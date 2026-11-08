@@ -20,6 +20,8 @@ from .devices import Connection, Outbox, Registry, authenticate, parse_devices
 
 logger = logging.getLogger(__name__)
 ACTIVE = None
+# Prompts a turn waits on: they reach the device at once, even while it waits for an answer.
+PROMPT_ORIGINS = ('approval', 'clarify')
 
 
 def _as_media(metadata):
@@ -81,6 +83,8 @@ class GlassesAdapter(BasePlatformAdapter):
         if self._auto_capture not in ('off', 'keywords'):
             raise ValueError('auto_capture must be keywords or off')
         self._photo_timeout = float(setting('photo_timeout', 25))
+        # A v0 device cannot tell a push from the answer it waits for: pushes wait for that answer, this long at most.
+        self._hold_seconds = float(setting('push_hold_seconds', 120))
         self._max_frame_mb = float(setting('max_frame_mb', 8))
         self.registry = Registry()
         self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)))
@@ -166,6 +170,11 @@ class GlassesAdapter(BasePlatformAdapter):
                     logger.debug('glasses: ignored malformed frame')
                     continue
                 kind = frame['type']
+                if kind in ('query', 'new_session'):
+                    if not (isinstance(frame.get('id'), str) and frame['id']):
+                        frame['id'] = uuid4().hex
+                    # Before the flush below: queued pushes must not reach a v0 device as this question's answer.
+                    conn.asking[frame['id']] = time.monotonic()
                 if kind != 'hello':
                     await self._flush_outbox(conn)
                 if kind == 'hello':
@@ -180,7 +189,7 @@ class GlassesAdapter(BasePlatformAdapter):
                 elif kind in ('photo', 'photo_error'):
                     self.broker.resolve(conn, frame)
                 elif kind == 'new_session':
-                    self._spawn(self._new_session(conn))
+                    self._spawn(self._new_session(conn, frame['id']))
                 elif kind == 'ping':
                     await conn.send_json(protocol.pong())
                 elif kind == 'debug':
@@ -194,14 +203,17 @@ class GlassesAdapter(BasePlatformAdapter):
         self.broker.cancel_all(conn)
         if conn.flush_task:
             conn.flush_task.cancel()
-        # Never settled: keep its pushes for the next connection, unless another device already received them.
+        if conn.held_task:
+            conn.held_task.cancel()
+        # Never settled or still held: keep its pushes for the next connection, unless another device already
+        # received them.
         delivered = self._delivered.get(conn.identity.user, ())
-        self.outbox.merge(conn.identity.user, [item for item in conn.pending if item[3] not in delivered])
-        conn.pending = []
+        self.outbox.merge(conn.identity.user, [item for item in [*conn.pending, *conn.held] if item[3] not in delivered])
+        conn.pending, conn.held = [], []
 
-    async def _new_session(self, conn):
+    async def _new_session(self, conn, query_id=None):
         conn.last_photo_at = 0
-        query_id = uuid4().hex
+        query_id = query_id or uuid4().hex
         self._resets[query_id] = (conn, time.monotonic())
         await self._process_query(conn, {'type': 'query', 'text': '/new', 'id': query_id}, reset=True)
 
@@ -212,9 +224,10 @@ class GlassesAdapter(BasePlatformAdapter):
         turn = self._active_turn.get(conn.identity.user)
         if turn and query_id in turn.arrivals:
             turn.arrivals.remove(query_id)  # answered: it was not folded into the running turn
-        conn = self._live_socket(conn)
+        asked, conn = conn, self._live_socket(conn)
         if conn:
             await conn.send_json(protocol.session_reset())
+        await self._answered(asked, query_id)
 
     def _live_socket(self, conn):
         """The device's socket: the one it asked on, or the one it reconnected with since."""
@@ -228,6 +241,7 @@ class GlassesAdapter(BasePlatformAdapter):
         text = text.strip() if isinstance(text, str) else ''
         if not text:
             await conn.send_json(protocol.error('Empty query.'))
+            await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user
         turn_id = frame.get('id')
@@ -286,10 +300,14 @@ class GlassesAdapter(BasePlatformAdapter):
                            key=lambda item: item[0])
             conn.pending, sent = [], 0
             try:
-                for _, text, origin, message_id in items:
-                    if not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
+                for item in items:
+                    _, text, origin, message_id = item
+                    if self._holds(conn, origin):
+                        self._hold(conn, item)
+                    elif not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
                         break
-                    self._mark_delivered(user, message_id)
+                    else:
+                        self._mark_delivered(user, message_id)
                     sent += 1
             finally:
                 if sent < len(items):  # closed or cancelled: keep the rest queued, retry on the next frame
@@ -303,6 +321,56 @@ class GlassesAdapter(BasePlatformAdapter):
         await asyncio.sleep(delay)
         await self._flush_outbox(conn)
 
+    def _waiting(self, conn):
+        """The device has a question in flight. One unanswered past the hold limit (an interrupted query) stops counting."""
+        now = time.monotonic()
+        for query_id, asked in list(conn.asking.items()):
+            if now - asked >= self._hold_seconds:
+                del conn.asking[query_id]
+        return bool(conn.asking)
+
+    def _holds(self, conn, origin):
+        # v0 has no push frame: a push sent while the device waits would be taken as its answer.
+        return conn.protocol == 0 and origin not in PROMPT_ORIGINS and self._waiting(conn)
+
+    def _hold(self, conn, item):
+        conn.held.append(item)
+        if conn.held_task is None:
+            conn.held_task = self._spawn(self._release_held_later(conn))
+
+    async def _release_held_later(self, conn):
+        await asyncio.sleep(self._hold_seconds)
+        await self._release_held(conn)
+
+    async def _release_held(self, conn):
+        user = conn.identity.user
+        async with self._lock(user):
+            task, conn.held_task = conn.held_task, None
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
+            items, conn.held = conn.held, []
+            for index, (_, text, origin, message_id) in enumerate(items):
+                if not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
+                    delivered = self._delivered.get(user, ())
+                    self.outbox.merge(user, [item for item in items[index:] if item[3] not in delivered])
+                    return
+                self._mark_delivered(user, message_id)
+
+    async def _answered(self, conn, query_id):
+        """The device got its answer (or its error): pushes held behind it follow now."""
+        if conn is None:
+            return
+        conn.asking.pop(query_id, None)
+        if conn.held and not self._waiting(conn):
+            await self._release_held(conn)
+
+    async def _settle(self, user, query_ids):
+        """A processing chain ended: its queries are answered or superseded (queued resets still wait)."""
+        for conn in self.registry.live(user):
+            for query_id in query_ids:
+                if query_id not in self._resets:
+                    await self._answered(conn, query_id)
+
     async def _push(self, user, content, origin, message_id):
         # The per-user lock keeps queued and live pushes in order. Devices whose protocol is not settled
         # yet hold the push until their flush; with no device reachable it waits in the outbox.
@@ -311,6 +379,9 @@ class GlassesAdapter(BasePlatformAdapter):
             for conn in self.registry.live(user):
                 if not conn.flushed:
                     conn.pending.append((time.time(), content, origin, message_id))
+                    reached = True
+                elif self._holds(conn, origin):
+                    self._hold(conn, (time.time(), content, origin, message_id))
                     reached = True
                 elif await conn.send_json(protocol.push(conn.protocol, content, origin, message_id)):
                     self._mark_delivered(user, message_id)
@@ -379,6 +450,7 @@ class GlassesAdapter(BasePlatformAdapter):
     async def _deliver_reply(self, user, conn, query_id, text):
         if not (conn in self.registry.live(user) and await conn.send_json(protocol.response(conn.protocol, text, query_id))):
             await self._push(user, text, 'reply', uuid4().hex)  # the asker went offline: deliver out of band
+        await self._answered(conn, query_id)
 
     async def _finish_query(self, user, turn):
         """Answer the query the chain is on, exactly once."""
@@ -391,10 +463,12 @@ class GlassesAdapter(BasePlatformAdapter):
                 self._resets.pop(turn.id, None)
                 if conn:
                     await conn.send_json(protocol.session_reset())
+                await self._answered(turn.conn, turn.id)
             elif turn.failed:
                 self._resets.pop(turn.id, None)
                 if conn:
                     await conn.send_json(protocol.error('New session failed.'))
+                await self._answered(turn.conn, turn.id)
             elif turn.id in self._resets:  # only queued: keep it fresh for the inline confirm of its replay
                 self._resets[turn.id] = (self._resets[turn.id][0], time.monotonic())
         elif turn.text or turn.commentary or turn.notes:
@@ -498,6 +572,7 @@ class GlassesAdapter(BasePlatformAdapter):
                     await self._status_to(asked, 'idle')
             await self._finish_query(user, turn)
             self._active_turn.pop(user, None)
+            await self._settle(user, {*turn.ids, turn.id})
 
     def _queued(self, query_id):
         return any(getattr(event, 'message_id', None) == query_id for event in self._pending_messages.values())

@@ -54,6 +54,9 @@ class Connection:
     flushed: bool = False  # offline queue delivered (after the protocol is known)
     last_status: dict = field(default_factory=dict)  # last status frame sent (repeats are dropped)
     pending: list = field(default_factory=list)  # pushes held until the protocol is known
+    asking: dict = field(default_factory=dict)  # queries awaiting their answer: id -> monotonic time asked
+    held: list = field(default_factory=list)  # pushes held for a v0 device until its answer has gone out
+    held_task: object = None
     flush_task: object = None
 
     async def send_json(self, frame):
