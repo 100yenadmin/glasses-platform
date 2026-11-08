@@ -195,13 +195,14 @@ async def test_every_folded_query_is_settled_when_the_chain_ends(hermes):
 @pytest.mark.asyncio
 async def test_a_new_push_never_overtakes_a_held_one(hermes):
     adapter, client, events = hermes
-    adapter._hold_seconds = 0.3
+    adapter._hold_seconds = 1.0
     glasses = await opened(client, version=0)
     event = await ask(glasses, events, 'q1')
     await adapter.on_processing_start(event)
-    await asyncio.sleep(0.2)
-    await adapter.send('alice', 'First.', metadata={'job_id': 'j1'})  # held; its own timer is due at 0.5 s
-    await asyncio.sleep(0.15)  # the question went stale at 0.3 s
+    await asyncio.sleep(0.5)
+    await adapter.send('alice', 'First.', metadata={'job_id': 'j1'})  # held; its own timer is due at 1.5 s
+    assert [item[1] for item in adapter.registry.live('alice')[0].held] == ['First.']
+    await asyncio.sleep(0.6)  # the question went stale at 1.0 s
     await adapter.send('alice', 'Second.', metadata={'job_id': 'j2'})
     await glasses.send_json({'type': 'ping'})
     assert [(await glasses.receive_json())['text'] for _ in range(2)] == ['First.', 'Second.']  # both at once, in order
