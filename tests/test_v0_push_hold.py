@@ -119,7 +119,8 @@ async def test_an_unanswered_question_holds_pushes_only_up_to_the_limit(hermes):
     await quiet(glasses)
     assert await responses(glasses, 1) == ['Reminder: check your gate.']  # the turn is still running
     await adapter.send('alice', 'Second reminder.', metadata={'job_id': 'j2'})  # the stale question no longer holds
-    assert await responses(glasses, 1) == ['Second reminder.']
+    await glasses.send_json({'type': 'ping'})
+    assert (await glasses.receive_json())['text'] == 'Second reminder.'  # sent at once, before the pong
     await glasses.close()
 
 
