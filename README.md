@@ -34,8 +34,9 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 ## Install
 
 Requirements:
-- Hermes Agent 0.22.2 or later. The plugin needs `aiohttp`. It is declared in `pyproject.toml`, so
-  `hermes plugins install` adds it when your Hermes was installed without the `messaging` extra.
+- Hermes Agent 0.22.2 or later. The plugin needs `aiohttp`, which is declared in `pyproject.toml`. If your Hermes
+  was installed without the `messaging` extra, `hermes plugins install` asks to install it. Without a terminal,
+  pass `--yes-deps`.
 - In-process plugin loading, which is the default. The opt-in `plugins.isolation: host` mode cannot load platform plugins.
 
 ```bash
