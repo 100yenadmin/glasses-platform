@@ -109,7 +109,19 @@ async def test_new_stream_segment_is_forwarded(server, monkeypatch):
         await adapter._deliver_reply('alice', conn, frame['id'], 'The answer is 42.')
     monkeypatch.setattr(adapter, '_process_query', query)
     result = await read_turn(client)
-    assert [part for part in result if part.startswith('c')] == ['cLooking.', 'cThe answer', 'c is 42.']
+    assert [part for part in result if part.startswith('c')] == ['cLooking.', 'c\n\nThe answer', 'c is 42.']
+
+
+async def test_streaming_cursor_never_resends_text(server, monkeypatch):
+    adapter, client = server
+
+    async def query(conn, frame):
+        for text in ['Hello ▉', 'Hello world ▉']:  # Hermes' partial updates end in its streaming cursor
+            await conn.send_json({'type': 'response_delta', 'turn': frame['id'], 'text': text})
+        await adapter._deliver_reply('alice', conn, frame['id'], 'Hello world!')
+    monkeypatch.setattr(adapter, '_process_query', query)
+    result = await read_turn(client)
+    assert ''.join(part[1:] for part in result if part.startswith('c')) == 'Hello world!'
 
 
 async def test_delta_arriving_during_socket_send_is_not_skipped(server, monkeypatch):

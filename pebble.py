@@ -11,11 +11,13 @@ from .devices import Connection, authenticate
 from .http_api import HttpSocket, _finish, _is_push, _reply, _requeue, _terminal, _wait_for
 
 WIDGET = '<<!!WIDGET:'
+CURSOR = ' ▉'  # Hermes' default streaming cursor on partial updates (gateway.config.DEFAULT_STREAMING_CURSOR)
 
 
 def _text(text, final=False):
     text = re.sub(r'<<!!WIDGET:.*?!!>>', '', text, flags=re.DOTALL)
     if not final:
+        text = text.removesuffix(CURSOR)  # a cursor would break the append-only diff and resend the text
         # Hold incomplete widgets (including their opening prefix) across cumulative deltas.
         start = text.find(WIDGET)
         if start >= 0:
@@ -82,7 +84,8 @@ class BobbyApi:
                 nonlocal previous
                 visible = _text(text, final)
                 # Hermes can begin a new cumulative segment after a tool call.
-                extra = visible[len(previous):] if visible.startswith(previous) else visible
+                extra = (visible[len(previous):] if visible.startswith(previous)
+                         else '\n\n' + visible if previous else visible)
                 if extra:
                     await ws.send_str('c' + extra)
                 previous = visible
