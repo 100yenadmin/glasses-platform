@@ -111,6 +111,35 @@ The plugin refuses to start without at least one token. It listens on all interf
 
 To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. The plugin does not terminate TLS.
 
+## Pebble (Bobby)
+
+Build the open-source [Bobby assistant](https://github.com/pebble-dev/bobby-assistant) (Apache-2.0) with the Pebble
+SDK installed. Pair a device with `hermes glasses pair <user> pebble`, then create
+`app/src/pkjs/urls_override.js` in your Bobby checkout with exactly these two exports (use your plugin device token):
+
+```javascript
+exports.QUERY_URL = 'wss://<host>/bobby/<token>/query';
+exports.QUOTA_URL = 'https://<host>/bobby/<token>/quota';
+```
+
+From the Bobby checkout, build and install with the phone's developer connection enabled:
+
+```sh
+cd app
+npm install
+pebble build
+pebble install --phone <phone-ip>
+```
+
+The phone must reach the gateway through Tailscale or an HTTPS proxy; Pebble's JavaScript needs `wss`/`https` for
+non-local hosts. The proxy must forward WebSocket upgrades. Keep the device URL private. Ask a question on the
+watch: Hermes streams its answer, followed by queued reminders and pushes. Approval or clarify questions appear
+as text; ask “yes” or “no” next. After `bobby_wait` seconds (`GLASSES_BOBBY_WAIT`, default 45), Bobby finishes with
+a still-working message; the late answer is queued for your next question.
+
+Bobby's own widgets and actions (including watch timers and reminders) are unsupported. Hermes reminders appear
+as plain text with the next answer. This endpoint has aiohttp client tests; a real-watch session is still needed.
+
 ## Try it
 
 **A demo gateway:** `demo/run_demo_gateway.sh <empty-dir>` starts an isolated Hermes gateway with this plugin, a

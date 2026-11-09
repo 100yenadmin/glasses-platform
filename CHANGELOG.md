@@ -2,6 +2,12 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## Unreleased
+
+- Bobby-compatible Pebble endpoints: streamed Hermes answers, text approvals and queued reminders with the next
+  answer, using a two-line `urls_override.js`. Includes quota compatibility, timeout recovery and delivery tests;
+  real-watch acceptance remains pending.
+
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
 - **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it

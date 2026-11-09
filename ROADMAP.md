@@ -93,7 +93,9 @@ rates. Simulator runs prove the server side only.
   approvals, pushes). Beta testers need no store review.
 - **M8 — Omi pendant:** an Omi app that receives live transcripts by webhook and feeds the user's session.
 - **M9 — Android: Wear OS and Android Auto:** one Android reference client; Android Auto shows its messages.
-- **M10 — Pebble:** point the open-source Bobby assistant's phone-side WebSocket at our protocol.
+- **M10 — Pebble** ([#27](https://github.com/100yenadmin/glasses-platform/issues/27)): Bobby-compatible query and
+  quota endpoints implemented, with streamed answers, queued pushes, build instructions and aiohttp client tests.
+  Real-watch session pending; server-side tests do not close the milestone.
 - **M11 — Mentra glasses:** Mentra Live and MentraOS (also G1, G2 and Vuzix through MentraOS).
 
 Meta Ray-Ban stays M2 (via hermes-glasses); public reach waits on Meta opening its device toolkit. The Meta AI
