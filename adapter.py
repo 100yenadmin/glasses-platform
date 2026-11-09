@@ -23,6 +23,33 @@ ACTIVE = None
 PROMPT_ORIGINS = ('approval', 'clarify')
 
 
+# Spoken answers to an approval prompt: a voice user cannot type /approve. Only these exact phrases count; anything
+# else goes to the agent as usual. "Yes" approves this one command once, never for the session or always.
+_YES = {'yes', 'yeah', 'yep', 'yes please', 'approve', 'approved', 'approve it', 'allow', 'allow it', 'go ahead',
+        'do it', 'yes do it', 'run it', 'ok', 'okay', 'sure'}
+_NO = {'no', 'nope', 'deny', 'denied', 'deny it', 'block it', 'dont', 'do not', 'dont do it', 'no dont',
+       'stop', 'cancel', 'no thanks'}
+
+
+def spoken_choice(text):
+    """'once' or 'deny' when the whole utterance is a yes or a no, else None."""
+    words = re.sub(r"[^a-z ]+", '', str(text or '').lower().replace('\u2019', "'").replace("'", '')).split()
+    if words[:2] == ['hey', 'hermes']:
+        words = words[2:]
+    elif words[:1] == ['hermes']:
+        words = words[1:]
+    phrase = ' '.join(words)
+    return 'once' if phrase in _YES else 'deny' if phrase in _NO else None
+
+
+@dataclass
+class Approval:
+    session_key: str
+    request_id: str | None
+    choices: list
+    at: float
+
+
 def _as_media(metadata):
     return {**(metadata or {}), 'glasses_media': True}
 
@@ -91,6 +118,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._tokens, self._active_turn, self._user_locks = {}, {}, {}
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
         self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
+        self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -252,6 +280,9 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user
+        choice = spoken_choice(text) if self._approvals.get(user) else None
+        if choice and await self._answer_approval(conn, frame.get('id'), choice):
+            return
         turn_id = frame.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
         self._queries[turn_id] = conn
@@ -494,6 +525,47 @@ class GlassesAdapter(BasePlatformAdapter):
             text = '\n'.join([turn.text or turn.commentary, *turn.notes]).strip()
             await self._deliver_reply(user, turn.conn, turn.id, text)
         await self._status(user, 'idle')
+
+    async def _send_exec_approval_prompt(self, prompt):
+        """A dangerous-command approval, said the way a voice user can answer it: yes or no."""
+        user = str(prompt.chat_id)
+        if user not in {identity.user for identity in self._tokens.values()}:
+            return SendResult(success=False, error='Unknown glasses user')
+        from gateway.platforms.base_exec_approval import approval_timeout_seconds
+        now, ttl = time.monotonic(), approval_timeout_seconds() + 60
+        pending = [a for a in self._approvals.get(user, []) if now - a.at < ttl]
+        pending.append(Approval(prompt.session_key, getattr(prompt, 'request_id', None), list(prompt.choices), now))  # no id before Hermes 0.23
+        self._approvals[user] = pending
+        command = ' '.join(str(prompt.command).split())
+        command = command if len(command) <= 90 else command[:87] + '...'
+        reason = ' '.join(str(prompt.description or '').split()).rstrip('.')
+        allow = 'Say yes to allow it once, or no to block it.' if 'once' in prompt.choices else 'Say no to block it.'
+        text = f'Hermes wants to run: {command}.' + (f' {reason}.' if reason else '') + f' {allow} (Typed: /approve or /deny.)'
+        return await self._push(user, text, 'approval', uuid4().hex)
+
+    async def _answer_approval(self, conn, query_id, choice):
+        """Resolve the oldest approval this user's devices were asked, with a spoken yes or no. False when none
+        is still waiting (answered elsewhere, timed out), so the words go to the agent instead."""
+        from tools.approval import resolve_gateway_approval
+        user = conn.identity.user
+        pending = self._approvals.get(user, [])
+        while pending:
+            approval = pending[0]
+            if choice not in approval.choices:
+                return False  # e.g. "yes" when only deny is offered: the agent hears it
+            if approval.request_id:
+                resolved = resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id)
+            else:
+                resolved = resolve_gateway_approval(approval.session_key, choice)
+            pending.pop(0)
+            if resolved:
+                if not pending:
+                    self._approvals.pop(user, None)
+                said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
+                await self._deliver_reply(user, conn, query_id, said)
+                return True
+        self._approvals.pop(user, None)
+        return False
 
     async def send_slash_confirm(self, chat_id, title, message, session_key, confirm_id, metadata=None):
         # The device's new_session button is the user's explicit confirmation of the /new it sends; anything
