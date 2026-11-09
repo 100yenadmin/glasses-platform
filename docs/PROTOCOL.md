@@ -73,7 +73,7 @@ to a device that declared `camera:false`.
 | `query` | `id`, `text`, `image?` `{data, mime}`, `tts?` | Like v0, plus an optional inline photo and a client turn id |
 | `photo` | `request`, `data`, `mime?` | Answer to `capture_photo` with the same `request` id |
 | `photo_error` | `request`, `message?` | — |
-| `interrupt` | — | **M1.** Stop the current turn (`/stop`) |
+| `interrupt` | `id?` | Stop the current turn: handled as a `query` with the text `/stop` (and this `id`, if given), so its `response` carries Hermes' confirmation |
 | `approval_response` | `id`, `choice` (`once`/`session`/`always`/`deny`) | **M1** |
 | `ack` | `id` | **M1.** Push received; removes it from the durable outbox |
 

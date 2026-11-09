@@ -31,7 +31,7 @@ Hermes gateway with real models only; no real glasses or phone app yet (that is 
 - [x] Approvals by voice (0.2.0): a dangerous-command approval is asked as a yes/no question, and a spoken "yes"
   (allow once) or "no" answers it. Native `approval_request` / `approval_response` frames stay planned for clients
   with buttons.
-- [ ] `interrupt` → `/stop`
+- [x] `interrupt` → `/stop` (0.2.1)
 - [ ] Durable outbox with `ack`
 - [x] `hermes glasses pair <user> <device>`: mint a device token and print a QR / connect URL (0.2.0), plus
   `devices`, `revoke` and `try` (talk to your agent from the terminal as a pair of glasses with a camera)

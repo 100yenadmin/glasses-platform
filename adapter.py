@@ -226,6 +226,8 @@ class GlassesAdapter(BasePlatformAdapter):
                     logger.debug('glasses: ignored malformed frame')
                     continue
                 kind = frame['type']
+                if kind == 'interrupt' and conn.protocol == 1:  # the wearer's stop button: Hermes' own /stop
+                    frame, kind = {'type': 'query', 'id': frame.get('id'), 'text': '/stop'}, 'query'
                 if kind in ('query', 'new_session'):
                     if not (isinstance(frame.get('id'), str) and frame['id']):
                         frame['id'] = uuid4().hex
