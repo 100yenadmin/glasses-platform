@@ -4,6 +4,15 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 
 ## Unreleased
 
+- **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it
+  and the words are handled exactly like typed text (spoken approvals and photo questions still work). Devices that
+  declare `audio_out` get each answer and push as audio from Hermes's own text-to-speech.
+- **Approval buttons.** Devices that declare `buttons` get `approval_request` cards with Hermes's choices, answered
+  with `approval_response` and bound to Hermes's request id; other devices of the user are told when it closes.
+- **Acknowledgements.** Devices that declare `ack` keep each push in the queue until they confirm it.
+- **Device actions.** New agent tools `glasses_show_text` and `glasses_buzz`, only for devices that declared a
+  display or haptics.
+- `hello_ack` reports the real plugin version and the server's features.
 - Roadmap: the plugin becomes the hub for every non-desktop Hermes device. See [ROADMAP.md](ROADMAP.md) and the device
   survey in [docs/DEVICES.md](docs/DEVICES.md).
 - Docs: the protocol spec for voice in and out, approval buttons, acknowledgements, device actions, capabilities and
