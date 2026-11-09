@@ -65,3 +65,30 @@ test('a rejected mic start does not send audio', async t => {
   Socket.last.frame({type: 'hello_ack'}); await connected;
   await app.tap(); assert.equal(Socket.last.sent.length, 0);
 });
+test('a disconnect while recording still turns the mic off and sends nothing', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const mic = [];
+  const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; }, textContainerUpgrade: async () => {}},
+    {}, () => {}, Socket);
+  t.after(() => app.close());
+  const connected = app.connect('ws://fixture/voice', 'fixture');
+  const socket = Socket.last;
+  socket.frame({type: 'hello_ack'}); await connected;
+  await app.tap(); app.pcm(new Uint8Array([1, 2]));
+  socket.close();
+  t.mock.timers.tick(8000); await flush();
+  assert.deepEqual(mic, [true, false]);
+  assert.ok(!socket.sent.some(frame => frame.type === 'query'));
+});
+test('leaving the foreground only stops the mic; the app keeps working', async t => {
+  const mic = [];
+  const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; }, textContainerUpgrade: async () => {}},
+    {}, () => {}, Socket);
+  t.after(() => app.close());
+  const connected = app.connect('ws://fixture/voice', 'fixture');
+  const socket = Socket.last;
+  socket.frame({type: 'hello_ack'}); await connected;
+  await app.tap(); app.pause(); await flush();
+  assert.deepEqual(mic, [true, false]);
+  await app.tap(); assert.deepEqual(mic, [true, false, true]);  // still connected and listening again
+});

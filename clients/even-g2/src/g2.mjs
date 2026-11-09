@@ -64,12 +64,13 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       try { await client.answerApproval(id, choice); dismiss(id); } catch { dismiss(id); fail(); }
       return;
     }
-    if (!client?.ready || turn) return;
+    if (turn || (!recording && !client?.ready)) return;  // a recording always stops, even after a disconnect
     micBusy = true;
     try {
       if (recording) {
         clearTimeout(timer); recording = false;
         if (!await serial(() => bridge.audioControl(false))) { fail(); return; }
+        if (!client?.ready) { chunks = []; fail(); return; }
         const data = btoa(chunks.map(chunk => Array.from(chunk, byte => String.fromCharCode(byte)).join('')).join(''));
         void ask({audio: {mime: 'audio/pcm', rate: 16000, data}}); next();
       } else {
@@ -98,7 +99,13 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       });
       client.on('approval_closed', frame => dismiss(frame.id));
       client.on('error', fail); client.on('disconnected', fail);
+      client.on('connected', () => { if (!turn && !recording && !approval) show('answer', 'Tap to talk to Hermes'); });
       await client.connect(); show('answer', 'Tap to talk to Hermes');
+    },
+    pause() {  // leaving the foreground: stop the mic, keep the app and its connection
+      if (!recording) return;
+      clearTimeout(timer); recording = false; chunks = [];
+      serial(() => bridge.audioControl(false)); show('answer', 'Tap to talk to Hermes');
     },
     exit() { serial(() => bridge.shutDownPageContainer(1)); },
     close() { closed = true; clearTimeout(timer); clearTimeout(renderTimer); clearTimeout(pushTimer); recording = false;

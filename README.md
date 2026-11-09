@@ -49,7 +49,7 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 | Glasses | Path |
 |---|---|
 | Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | A phone app on Meta's Wearables Device Access Toolkit. The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode; not yet tested against this plugin on a device. |
-| Even Realities G2 | [Hermes Glasses Even Hub app](clients/even-g2/README.md): mic, lens replies, pushes and touchpad approvals (M7; simulator proof pending) |
+| Even Realities G2 | [Hermes Glasses Even Hub app](clients/even-g2/README.md): mic, lens replies, pushes and touchpad approvals (M7; checked in the Even Hub simulator, not yet on real glasses) |
 | Mentra Live | Mentra cloud app (M4) |
 | Meta AI on glasses | Meta AI Connectors endpoint (M4, gated on Meta early access) |
 
