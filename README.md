@@ -310,6 +310,9 @@ server's advertised capabilities.
 `.env` line or log line that contains a device token**; replace the token with `<token>`. Revoke and re-pair any
 device whose token was shared (`hermes glasses revoke <user> <device>`).
 
+For a security problem, [report it privately](https://github.com/100yenadmin/glasses-platform/security/advisories/new)
+instead of opening a public issue.
+
 ## Links
 
 [Releases](https://github.com/100yenadmin/glasses-platform/releases) ·

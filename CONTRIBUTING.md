@@ -5,6 +5,8 @@ Bug reports and pull requests are welcome.
 - **Report a bug:** [open an issue](https://github.com/100yenadmin/glasses-platform/issues/new) with your Hermes
   version, the plugin version, the device and what happened. Never paste a connect URL, QR code, `.env` line or log
   line that contains a device token; write `<token>` instead.
+- **Report a security problem** privately through a
+  [security advisory](https://github.com/100yenadmin/glasses-platform/security/advisories/new), not a public issue.
 - **Change code:** branch from `next` and open the pull request against `next`. Releases go from `next` to `main`.
 - **Run the tests** against a Hermes source tree (0.22.2 or later) with its virtual environment:
 
