@@ -12,6 +12,8 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 - **Acknowledgements.** Devices that declare `ack` keep each push in the queue until they confirm it.
 - **Device actions.** New agent tools `glasses_show_text` and `glasses_buzz`, only for devices that declared a
   display or haptics.
+- **HTTP route** for devices that cannot keep a WebSocket open (Apple Watch, Siri Shortcuts, scripts): `POST /turn`,
+  long-poll `GET /pending` and `POST /approval`, with the same device tokens.
 - `hello_ack` reports the real plugin version and the server's features.
 - Roadmap: the plugin becomes the hub for every non-desktop Hermes device. See [ROADMAP.md](ROADMAP.md) and the device
   survey in [docs/DEVICES.md](docs/DEVICES.md).

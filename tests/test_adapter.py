@@ -11,8 +11,8 @@ from gateway.platforms.event import MessageType, ProcessingOutcome
 JPEG = Path(__file__).parent / 'fixtures' / 'scene.jpg'
 
 
-async def until(ws, kind):
-    async with asyncio.timeout(3):
+async def until(ws, kind, seconds=3):
+    async with asyncio.timeout(seconds):
         while True:
             frame = await ws.receive_json()
             if frame['type'] == kind:
@@ -62,7 +62,8 @@ async def test_offline_flush(server):
     await adapter.send('alice', 'one')
     await adapter.send('alice', 'two')
     ws = await opened(client, version=0)
-    assert [(await until(ws, 'response'))['text'] for _ in range(2)] == ['one', 'two']
+    # A v0 device gets its queue after the 2 s protocol wait: 3 s left too little room on a loaded machine.
+    assert [(await until(ws, 'response', 8))['text'] for _ in range(2)] == ['one', 'two']
     assert adapter.outbox.drain('alice') == []
     await ws.close()
 

@@ -18,6 +18,7 @@ from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 from . import audio, protocol
 from .capture import PhotoBroker, decode_photo, should_capture_photo
 from .devices import Connection, Outbox, Registry, authenticate, parse_devices
+from .http_api import register_routes
 
 logger = logging.getLogger(__name__)
 ACTIVE = None
@@ -168,6 +169,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._app = web.Application(client_max_size=int(self._max_frame_mb * 1024 * 1024))
         self._app.router.add_get(self._path, self._websocket)
         self._app.router.add_get('/health', self._health)
+        register_routes(self, self._app)
         # Public aiohttp calls, not Hermes' private shared_ingress.bind_listener: glasses is not one of Hermes'
         # port-binding platforms, so its shared-listener mode never applies and the bind is the same.
         # Query credentials must never reach aiohttp's access log.
@@ -314,7 +316,7 @@ class GlassesAdapter(BasePlatformAdapter):
         live = self.registry.live(conn.identity.user)
         if conn in live:
             return conn
-        return next((other for other in reversed(live) if other.identity == conn.identity), None)
+        return next((other for other in reversed(live) if other.identity == conn.identity and not other.slot), None)
 
     async def _process_query(self, conn, frame, reset=False):
         self._silent[(conn.identity.user, frame.get('id'))] = frame.get('speak') is False
@@ -434,7 +436,10 @@ class GlassesAdapter(BasePlatformAdapter):
         if not await conn.send_json(frame):
             return False
         user = conn.identity.user
-        if frame['type'] == 'push' and conn.capabilities.get('ack') is True:
+        if conn.slot:  # an HTTP answer: delivered once the answer is written (http_api), queued again if not
+            conn.sent_items.append((item, frame))
+            self.outbox.track(user, item)  # stays in the file until then, so a restart cannot lose it
+        elif frame['type'] == 'push' and conn.capabilities.get('ack') is True:
             if message_id not in self._delivered.get(user, ()):
                 conn.unacked[message_id] = item
                 self.outbox.track(user, item)
@@ -547,7 +552,8 @@ class GlassesAdapter(BasePlatformAdapter):
         turn = self._active_turn.get(user)
         final = metadata.get('notify') and not metadata.get('_interim_send')
         owner = metadata.get('reply_to_message_id')  # stream-consumer writes name the query they belong to
-        if final and reply_to in self._queries and not (turn and reply_to in turn.ids):
+        asker = self._queries.get(reply_to) if reply_to is not None else None
+        if final and asker is not None and asker.identity.user == user and not (turn and reply_to in turn.ids):
             # A command answered inline while a turn runs (/stop, /status): the reply to that query alone.
             if turn and reply_to in turn.arrivals:
                 turn.arrivals.remove(reply_to)

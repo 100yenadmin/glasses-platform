@@ -4,7 +4,7 @@ Status: **v1, extended in 0.4.0** (sections marked *planned* are specified but n
 
 - **Transport:** one WebSocket per device at `ws(s)://<host>:<port><path>`. The default is `:8765/voice`.
 - **Frames:** UTF-8 JSON text frames, each an object with a `type` field. Binary data (photos, audio) travels
-  base64-encoded inside JSON. Devices that cannot hold a WebSocket use the [HTTP route](#http-route-planned).
+  base64-encoded inside JSON. Devices that cannot hold a WebSocket use the [HTTP route](#http-route).
 
 ## Authentication
 
@@ -195,7 +195,7 @@ the push stays in the server's queue: if the device disconnects first, the push 
 connect. Devices that do not declare `ack` keep the default: a push counts as delivered once it is written to
 the socket.
 
-## HTTP route (planned)
+## HTTP route
 
 For devices that cannot keep a WebSocket open (Apple Watch, Garmin, Siri Shortcuts, scripts). Same listener, same
 device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
@@ -206,14 +206,21 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   clarify question), it answers early with `"status":"needs_answer"` and the prompt in `"prompts"`; answer it with
   another `POST /turn` (for example `{"text":"yes"}`) or with `POST /approval`. If the turn is still running after
   `turn_timeout` seconds (default 50), it answers `202` with `"status":"pending"`, and the reply arrives later
-  through `/pending`. With `Accept: text/plain` the body is just the reply text, for Shortcuts.
+  through `/pending`. With `Accept: text/plain` the body is just the reply text (or the prompts), for Shortcuts;
+  pushes it does not show stay queued for `/pending`. A request has no camera, display or haptics: those
+  capabilities are ignored here.
 - `GET /pending?wait=25` waits up to `wait` seconds (at most 55) for pushes and answers
   `{"items":[<push frames>]}` as soon as there is at least one, or an empty list at the deadline. Pushes are
   removed from the queue once they are in an answer.
 - `POST /approval` with `{"id","choice"}` answers like `approval_response` and returns the `approval_result`.
-- While a request is open the device counts as connected, so pushes for it go into that request's answer instead
-  of the queue. A request that has already answered never loses a push: anything that arrives later waits in the
+- Each request is its own short-lived connection: it never replaces the device's WebSocket or another open request.
+  While it is open the device counts as connected, so pushes for it go into that request's answer instead of the
+  queue. They count as delivered only once the answer has been written, so a gateway restart during the wait
+  keeps them. If the answer cannot be written (the client went away), its pushes and the turn's reply go back to the
+  queue. A request that has already answered never loses a push: anything that arrives later waits in the
   queue for the next request.
+- A push can arrive twice (in an open `/turn` and an open `/pending` of the same device, or again after an answer
+  that could not be written): drop repeats by `id`.
 - Status codes: `401` bad or missing token, `400` malformed body, `413` too large, `202` still running.
 
 ## Limits

@@ -63,6 +63,8 @@ class Connection:
     held_task: object = None
     flush_task: object = None
     unacked: dict = field(default_factory=dict)  # push id -> item, retained until any device delivers it
+    slot: str = ''  # registry key for a short-lived HTTP connection, so it never replaces the device's socket
+    sent_items: list = field(default_factory=list)  # (queue item, frame) written to a short-lived HTTP connection
 
     async def send_json(self, frame):
         async with self.send_lock:
@@ -81,15 +83,17 @@ class Registry:
 
     async def add(self, conn):
         devices = self.by_user.setdefault(conn.identity.user, {})
-        old = devices.get(conn.identity.device)
-        devices[conn.identity.device] = conn
+        key = conn.slot or conn.identity.device
+        old = devices.get(key)
+        devices[key] = conn
         if old is not None and old is not conn:
             await old.ws.close(code=4000, message=b'replaced')
 
     def remove(self, conn):
         devices = self.by_user.get(conn.identity.user, {})
-        if devices.get(conn.identity.device) is conn:
-            del devices[conn.identity.device]
+        key = conn.slot or conn.identity.device
+        if devices.get(key) is conn:
+            del devices[key]
         if not devices:
             self.by_user.pop(conn.identity.user, None)
 
