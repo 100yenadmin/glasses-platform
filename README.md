@@ -121,8 +121,13 @@ To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. 
 Omi's servers call this URL, so it must be reachable from the internet through an HTTPS reverse proxy or
 Tailscale Funnel. Keep the URL private and keep tokens out of proxy access logs. The plugin makes no outbound
 Omi calls. Replies taking longer than `omi_wait` seconds (default 20, `GLASSES_OMI_WAIT`) wait for the next
-transcript call, as do pushes sent while the pendant is offline. Messages keep the newest 1000 characters;
-pushes clipped or omitted by that limit stay queued. This path is tested with fakes; no Omi account has been tested.
+transcript call, as do pushes sent while the pendant is offline. Messages start with `Hermes: ` so even short
+answers display. Within 1000 characters, items appear oldest first; an item that exceeds the remaining room
+keeps its head and ends in `…`, counting as shown. Items with no room stay queued for the next call.
+When a call has no `is_user: true` segment, every speaker counts, so anyone nearby can answer an approval.
+Overlapping webhook calls can show the same push twice. Session buffers expire after ten minutes idle and
+retain at most 256 segment keys and 32 sessions per device identity. This path is tested with fakes;
+no Omi account has been tested.
 
 ## Try it
 

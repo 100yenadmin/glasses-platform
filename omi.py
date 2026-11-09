@@ -9,7 +9,7 @@ from gateway.platforms._shared import extra_or_secret
 from .devices import Connection, authenticate
 from .http_api import HttpSocket, _finish, _is_push, _reply, _requeue, _send, _terminal, _wait_for
 
-WAKE = re.compile(r'^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes\b[\W_]*', re.IGNORECASE)
+WAKE = re.compile(r"^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes(?=,|$| (?!['’]s))[\W_]*", re.IGNORECASE)
 FOLLOWUP_SECONDS = 8
 MESSAGE_LIMIT = 1000
 MESSAGE_PREFIX = 'Hermes: '
@@ -67,7 +67,7 @@ class OmiApi:
     async def _segments(self, request):
         try:
             segments = await request.json()
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
             raise web.HTTPBadRequest(text='{"error":"malformed JSON"}', content_type='application/json')
         if not isinstance(segments, list) or any(
                 not isinstance(segment, dict) or not isinstance(segment.get('text'), str)

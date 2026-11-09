@@ -38,16 +38,20 @@ async def test_bad_path_token_cannot_be_overridden(server):
     assert not adapter.registry.live('alice')
 
 
-@pytest.mark.parametrize('text', ['talking to somebody', 'ask Hermes tomorrow', 'hermesian weather', 'hey hermesville'])
+@pytest.mark.parametrize('text', ['talking to somebody', 'ask Hermes tomorrow', 'hermesian weather', 'hey hermesville',
+                                 "Hermes's docs are great", 'Hermes’s docs are great',
+                                 "Hermes 's docs are great", 'Hermes ’s docs are great',
+                                 'Hermes: tell me the time', 'Hermes! tell me the time'])
 async def test_no_wake_phrase_is_not_a_query(server, text):
     adapter, client = server
     adapter._process_query = AsyncMock()
+    api_for(adapter).omi_wait = 0.01
     assert await post(client, segment(text)) == {}
     adapter._process_query.assert_not_called()
     assert not adapter.registry.live('alice')
 
 
-@pytest.mark.parametrize('wake', ['Hey Hermes, ', 'hermes: ', 'OK, HEY HERMES! ', 'Okay... Hermes — ',
+@pytest.mark.parametrize('wake', ['Hey Hermes, ', 'hermes ', 'OK, HEY HERMES, ', 'Okay... Hermes, — ',
                                  '“Hey, Hermes,” '])
 async def test_wake_becomes_existing_v1_query_and_reply(server, monkeypatch, wake):
     adapter, client = server
@@ -65,7 +69,7 @@ async def test_wake_becomes_existing_v1_query_and_reply(server, monkeypatch, wak
 async def test_wake_alone_collects_next_segments_in_same_session(server):
     adapter, client = server
     reply_with(adapter)
-    assert await post(client, segment('Hey Hermes!')) == {}
+    assert await post(client, segment('Hey Hermes,')) == {}
     assert await post(client, segment('unrelated', 1), url=URL.replace('live', 'other')) == {}
     assert await post(client, segment('what time', 1), segment('is it', 2)) == {'message': 'Hermes: Hello back.'}
     assert adapter.handle_message.call_args.args[0].text == 'what time is it'
@@ -293,6 +297,17 @@ async def test_malformed_body_is_rejected_without_consuming_pushes(server, raw):
     adapter, client = server
     await adapter.send('alice', 'Keep this reminder.')
     assert (await client.post(URL, data=raw)).status == 400
+    assert [item[1] for item in adapter.outbox.drain('alice')] == ['Keep this reminder.']
+
+
+async def test_json_recursion_error_is_rejected_without_consuming_pushes(server, monkeypatch):
+    adapter, client = server
+    await adapter.send('alice', 'Keep this reminder.')
+    # Decoder recursion behaviour varies by Python version; force its documented failure.
+    monkeypatch.setattr(http_api.web.Request, 'json', AsyncMock(side_effect=RecursionError('nested JSON')))
+    response = await client.post(URL, data='[' * 2000 + '0' + ']' * 2000)
+    assert response.status == 400
+    assert await response.json() == {'error': 'malformed JSON'}
     assert [item[1] for item in adapter.outbox.drain('alice')] == ['Keep this reminder.']
 
 

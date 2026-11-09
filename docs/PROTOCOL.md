@@ -236,20 +236,28 @@ access alone is insufficient. See [setup](../README.md#omi-pendant). The plugin 
 - The body is a JSON **array**, for example
   `[{"text":"Hey Hermes, what time is it","speaker":"SPEAKER_00","speakerId":0,"is_user":true,"start":0,"end":2}]`.
   Malformed JSON or segments get `400`, a bad token gets `401`, and the listener's body limit still applies (`413`).
-- A segment starting with “hey hermes” or “hermes” starts a question, ignoring case, punctuation and a
-  leading “ok” or “okay”. The following words become the query. A wake phrase alone arms an eight-second
+- A segment starting with “hey hermes” or “hermes” starts a question, ignoring case, leading punctuation and a
+  leading “ok” or “okay”. The wake word must be followed by a comma, the end of the segment, or a space
+  whose following text does not start with `'s` or `’s`; “Hermes's docs are great” does not wake it.
+  The following words become the query. A wake phrase alone arms an eight-second
   window for subsequent segments in that session; eligible segments in the completing call are joined.
-  A call with any `is_user:true` segments uses only those segments; otherwise all speakers count.
-  Repeated segments with the same start time and text are ignored within that device's session.
+  A call with any `is_user:true` segments uses only those segments; otherwise all speakers count, so anyone
+  nearby can answer an approval. Repeated segments with the same start time and text are ignored within
+  that device's session, retaining the newest 256 keys. After ten minutes without a call, session state
+  expires (pruned on the next call). Each device identity keeps at most 32 sessions, evicting the least
+  recently used.
 - Each question is an ordinary v1 query on a short-lived connection with capabilities `{}`. The webhook
   waits up to `omi_wait` seconds (`GLASSES_OMI_WAIT`, default 20) for its reply or an approval/clarify prompt.
   It always answers a valid call with `200`: `{"message":"<text>"}` when there is text, otherwise `{}`.
-  Omi displays a notification when `message` is longer than five characters. A late reply becomes a queued
+  Every non-empty message starts with `Hermes: ` so it exceeds Omi's five-character display threshold.
+  A late reply becomes a queued
   push for a later call. Approval prompts use the existing spoken path: “Hey Hermes, yes” or “Hey Hermes, no”.
 - Every call, including an empty array or one without a wake phrase, flushes this user's queued pushes.
-  Pushes and replies are joined in arrival order (newest last), separated by blank lines, and limited to the
-  newest 1000 characters. Only complete pushes included in the successfully written answer are acknowledged;
-  clipped or omitted pushes stay queued. If a write fails, pushes and replies are queued again. The same
+  Pushes and replies are joined in arrival order (oldest first), separated by blank lines, with a total limit
+  of 1000 characters including the prefix. An item exceeding the remaining room keeps its head and ends
+  with `…`; it counts as shown and is acknowledged after a successful write. Items with no room stay queued
+  for the next call. Overlapping webhook calls can show the same push twice.
+  If a write fails, pushes and replies are queued again. The same
   HTTP finish-under-lock and release helpers keep pushes arriving at the deadline for the next call.
 - Delivery requires transcript calls: while the pendant is offline or no live conversation is running,
   messages wait in the normal outbox. This route does not replace a WebSocket or another open request.
