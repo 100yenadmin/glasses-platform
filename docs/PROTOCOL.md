@@ -61,7 +61,7 @@ Status: **v1, extended in 0.4.0** (sections marked *planned* are specified but n
 
 ```json
 {"type":"hello_ack","protocol":1,"user":"owner","device":"rayban",
- "server":{"plugin":"glasses-platform","version":"0.5.2","features":["audio_in","audio_out","approval_buttons","ack","display","haptic"]}}
+ "server":{"plugin":"glasses-platform","version":"0.6.0","features":["audio_in","audio_out","approval_buttons","ack","display","haptic"]}}
 ```
 
 `server.version` is the plugin's real version and `server.features` lists what this server supports, so a client

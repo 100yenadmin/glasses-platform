@@ -27,7 +27,8 @@ asyncio.run(main())
 
 This is a protocol library for scripts, Raspberry Pi devices, desktop tools and
 Python bridges to microcontrollers. It does not run on MicroPython or provide a
-hardware bridge. Real devices and gateways have not been tested with this client.
+hardware bridge. Checked against a real Hermes gateway (a text turn and a photo turn); real devices and
+MicroPython have not been tested.
 
 Set `client.on_capture_photo = lambda reason: base64_jpeg` for automatic camera
 answers; async callables also work. Or listen for `capture_photo` and call
@@ -84,7 +85,6 @@ pending. Use JSON to distinguish needs_answer. Non-success HTTP codes raise
 `HermesGlassesError`. Both clients send Bearer authentication. Use HTTPS/WSS away
 from localhost and keep tokens out of logs.
 
-From the repository root, run `python -m pytest -p tests.conftest clients/python`
-with `HERMES_SOURCE` pointing at a prepared Hermes checkout. Tests use localhost
-peers, including the conformance kit. No hardware, real agent, TLS deployment or
-live reconnect environment is proven.
+From the repository root, run `python -m pytest clients/python` with `HERMES_SOURCE`
+pointing at a prepared Hermes checkout. Tests use localhost peers, including the
+conformance kit. Hardware, TLS deployments and live reconnects are not proven.
