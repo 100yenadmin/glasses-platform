@@ -33,5 +33,5 @@ jobs:
           export HERMES_GATEWAY_MAX_STARTS=0 HERMES_STATE_DB_GUARD_BYPASS=1 HERMES_DISABLE_LAZY_INSTALLS=1
           mkdir -p "$HOME" "$HERMES_HOME"
           "$HERMES_SOURCE/.venv/bin/hermes" plugins validate .
-          "$HERMES_SOURCE/.venv/bin/python" -m pytest -q tests --basetemp="$GLASSES_TEST_SCRATCH/unit"
+          "$HERMES_SOURCE/.venv/bin/python" -m pytest -q tests conformance clients/python --basetemp="$GLASSES_TEST_SCRATCH/unit"
           GLASSES_PLATFORM_INTEGRATION=1 "$HERMES_SOURCE/.venv/bin/python" -m pytest -q -s tests/integration --basetemp="$GLASSES_TEST_SCRATCH/integration"

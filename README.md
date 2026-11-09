@@ -55,7 +55,7 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 | Pebble watches | [The open-source Bobby app](#pebble-bobby) with a two-line URL override | Bobby-protocol client + real gateway |
 | Apple Watch, Siri Shortcuts, scripts | [HTTP route](docs/devices/apple-watch.md): `POST /turn`, `GET /pending` | Real gateway |
 | Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode | Bundled v0 simulator |
-| Your own client | [JavaScript client](clients/js/hermes-glasses.js), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
+| Your own client | [JavaScript client](clients/js/hermes-glasses.js), [Python client](clients/python/README.md), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
 
 Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
 
