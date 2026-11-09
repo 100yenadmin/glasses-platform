@@ -72,7 +72,9 @@ async def test_complete_checker_including_http_and_duplicate_detection():
             elif kind == 'query':
                 response = {'type': 'response', 'turn': frame['id'], 'text': 'hello', 'final': True}
                 await ws.send_json(response)
-                if duplicate:
+                if duplicate == 'null':
+                    await ws.send_json(None)  # valid JSON that is not a frame
+                elif duplicate:
                     await ws.send_json(response)
             elif kind == 'new_session':
                 await ws.send_json({'type': 'session_reset'})
@@ -100,6 +102,11 @@ async def test_complete_checker_including_http_and_duplicate_detection():
         bad = await kit.check_server(url, 'fixture')
         assert any(item['check'] == 'query yields exactly one matching response' and item['status'] == 'FAIL'
                    for item in bad.checks)
+        duplicate = 'null'
+        odd = await kit.check_server(url, 'fixture')  # reported, not raised
+        assert any(item['check'] == 'query yields exactly one matching response' and item['status'] == 'FAIL'
+                   for item in odd.checks)
+        assert any(item['check'] == 'new_session yields session_reset' for item in odd.checks)
 
 
 @pytest.mark.asyncio
@@ -217,3 +224,19 @@ def test_checker_cli_timeout(monkeypatch, timeout):
         cli.main()
     assert exit.value.code == 0
     assert check.call_args.kwargs['timeout'] == (10 if timeout is None else float(timeout))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('query', 'ok'), [({'text': 'hello'}, True), ({}, False), ({'text': '  '}, False),
+                                           ({'audio': {'data': 'UklGRg==', 'mime': 'audio/wav'}}, True)])
+async def test_fake_server_requires_an_utterance(query, ok):
+    app = kit.fake_app('fixture')
+    async with TestServer(app) as server, aiohttp.ClientSession() as session:
+        async with session.ws_connect(server.make_url('/voice?token=fixture')) as ws:
+            assert (await ws.receive_json())['type'] == 'welcome'
+            await ws.send_json({'type': 'hello', 'protocol': 1, 'device': {'name': 'fixture', 'capabilities': {}}})
+            await kit.receive(ws, 'hello_ack')
+            await ws.send_json({'type': 'query', 'id': 'fixture', **query})
+            await kit.receive(ws, 'response')
+            await ws.receive()
+    assert {item['check']: item['status'] for item in app['reports'][0].checks}['query'] == ('PASS' if ok else 'FAIL')

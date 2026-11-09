@@ -388,3 +388,22 @@ test('invalid URL rejects and emits once with no reconnect timer', async t => {
   t.mock.timers.tick(60000);
   assert.equal(errors, 1);
 });
+
+test('generated ids are unique per client instance; disconnect then connect opens a fresh socket', async () => {
+  const first = setup().client, second = setup().client;
+  const a = first.nextId(), b = second.nextId();
+  assert.match(a, /^q-[a-z0-9]+-\d+$/);
+  assert.notEqual(a, b);
+  const {client, socket} = setup();
+  await client.connect();
+  client.disconnect();
+  assert.equal(client.ready, false);
+  const again = client.connect();
+  const fresh = Socket.instances.at(-1);
+  assert.notEqual(fresh, socket);
+  fresh.frame({type: 'welcome', protocol_max: 1});
+  fresh.frame({type: 'hello_ack', protocol: 1, user: 'fixture', device: 'test', server: {version: 'x', features: []}});
+  await again;
+  assert.equal(client.ready, true);
+  for (const c of [first, second, client]) c.disconnect();
+});

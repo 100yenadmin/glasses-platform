@@ -123,6 +123,9 @@ async def check_server(url, token, http=None, full=False, timeout=10):
                 async with asyncio.timeout(timeout):
                     while True:
                         frame = await ws.receive_json()
+                        if not isinstance(frame, dict):
+                            matches = False
+                            continue
                         if frame.get('type') == 'response' and frame.get('turn') == turn:
                             matches = False
                         if frame.get('type') == 'pong':
@@ -250,7 +253,10 @@ def fake_app(token, *, on_report=None, scenario_timeout=20):
                     elif kind == 'query':
                         queried = True
                         turn = frame.get('id')
-                        report.add('query', isinstance(turn, str) and bool(turn))
+                        audio = frame.get('audio')
+                        said = (isinstance(frame.get('text'), str) and frame['text'].strip()
+                                or isinstance(audio, dict) and isinstance(audio.get('data'), str) and audio['data'])
+                        report.add('query', isinstance(turn, str) and bool(turn) and bool(said))
                         if frame.get('audio'):
                             await ws.send_json({'type': 'transcript', 'turn': turn, 'text': 'Fixture transcript'})
                         await ws.send_json({'type': 'status', 'state': 'thinking'})
