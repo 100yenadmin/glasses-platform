@@ -19,6 +19,10 @@ from .ogg import mux_opus, demux_opus
 logger = logging.getLogger(__name__)
 HELLO_TIMEOUT = 10
 AUDIO_TIMEOUT = 20
+MAX_OPUS_PACKET_BYTES = 1500
+MAX_RECORDING_BYTES = 15 * 16000  # 15 seconds at 16 kB/s of encoded Opus
+MAX_WS_MESSAGE_BYTES = 64 * 1024  # room for JSON control frames and binary packet headers
+OGG_THREAD_BYTES = 32 * 1024  # keep larger container/CRC work off the gateway loop
 _missing_ffmpeg = False
 
 
@@ -64,7 +68,11 @@ async def transcode(data):
         return []
     try:
         output, _ = await asyncio.wait_for(process.communicate(data), 20)
-        return demux_opus(output) if process.returncode == 0 else []
+        if process.returncode != 0:
+            return []
+        if len(output) >= OGG_THREAD_BYTES:
+            return await asyncio.to_thread(demux_opus, output)
+        return demux_opus(output)
     finally:
         if process.returncode is None:
             with suppress(ProcessLookupError):
@@ -77,19 +85,21 @@ class Speech:
     text: str
     ref: str | None
     audio: asyncio.Future
-    push: tuple | None = None
+    push: bool = False
     at: float = field(default_factory=time.monotonic)
 
 
 class XiaozhiSocket:
     """Accept adapter frames promptly; serialize speech while audio can arrive independently."""
-    def __init__(self, ws, session_id, version=1, audio_params=None, *, audio_timeout=None, pace=0.055):
+    def __init__(self, ws, session_id, version=1, audio_params=None, *, audio_timeout=None, pace=0.055,
+                 on_delivered=None):
         self.ws, self.session_id, self.version = ws, session_id, version
         self.audio_params = audio_params or {}
         self.audio_timeout = AUDIO_TIMEOUT if audio_timeout is None else audio_timeout
         self.pace = pace
+        self.on_delivered = on_delivered
         self.queue = asyncio.Queue()
-        self.waiting, self.unsent = {}, {}
+        self.waiting = {}
         self.worker = None
         self.thinking = False
         self.speaking = False
@@ -119,14 +129,11 @@ class XiaozhiSocket:
                 self.thinking = False
             ref = frame.get('turn') if kind == 'response' else frame.get('id') if kind == 'push' else None
             future = asyncio.get_running_loop().create_future()
-            push = (time.time(), frame.get('text', ''), frame.get('origin', 'message'), ref) if kind == 'push' else None
-            item = Speech(frame.get('text', frame.get('message', '')), ref, future, push)
+            item = Speech(frame.get('text', frame.get('message', '')), ref, future, kind == 'push')
             if ref:
                 self.waiting[ref] = item
             else:
                 future.set_result(None)
-            if push:
-                self.unsent[ref] = push
             self.queue.put_nowait(item)
             if self.worker is None or self.worker.done():
                 self.worker = asyncio.create_task(self._speak())
@@ -167,8 +174,8 @@ class XiaozhiSocket:
                     await asyncio.sleep(self.pace)
                 await self._json('tts', state='stop')
                 self.speaking = False
-                if item.push:
-                    self.unsent.pop(item.ref, None)
+                if item.push and self.on_delivered:
+                    self.on_delivered(item.ref)
         except (ConnectionError, RuntimeError, OSError):
             logger.debug('xiaozhi: speech socket closed')
 
@@ -189,7 +196,7 @@ class XiaozhiSocket:
 
 
 class Recording:
-    def __init__(self, params, mode='manual', max_bytes=8 * 1024 * 1024):
+    def __init__(self, params, mode='manual', max_bytes=MAX_RECORDING_BYTES):
         self.rate = params.get('sample_rate', 16000)
         self.channels = params.get('channels', 1)
         self.frame_ms = params.get('frame_duration', 60)
@@ -202,19 +209,21 @@ class Recording:
         self.deadline = time.monotonic() + 15
 
     def add(self, packet):
-        self.size += len(packet)
-        if self.size > self.max_bytes:
+        if self.size + len(packet) > self.max_bytes:
             return True
+        self.size += len(packet)
         self.packets.append(packet)
         self.speech |= len(packet) > 40
         self.quiet = self.quiet + self.frame_ms if len(packet) <= 12 and self.speech else 0
         return (self.mode in ('auto', 'realtime') and self.quiet >= 800
-                or len(self.packets) * self.frame_ms >= 15000)
+                or self.size >= self.max_bytes or len(self.packets) * self.frame_ms >= 15000)
 
-    def query(self):
+    async def query(self):
         if not self.speech:
             return None
-        data = mux_opus(self.packets, self.rate, self.channels, self.frame_ms)
+        args = (self.packets, self.rate, self.channels, self.frame_ms)
+        data = (await asyncio.to_thread(mux_opus, *args) if self.size >= OGG_THREAD_BYTES
+                else mux_opus(*args))
         return {'type': 'query', 'id': uuid4().hex, 'text': '',
                 'audio': {'data': base64.b64encode(data).decode(), 'mime': 'audio/ogg'}}
 
@@ -243,7 +252,7 @@ def register_routes(adapter, app):
         auth = request.headers.get('Authorization', '')
         token = auth[7:] if auth.lower().startswith('bearer ') else request.query.get('token')
         identity = authenticate(token, adapter._tokens)
-        ws = web.WebSocketResponse(heartbeat=30, max_msg_size=int(adapter._max_frame_mb * 1024 * 1024))
+        ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_WS_MESSAGE_BYTES)
         await ws.prepare(request)
         if identity is None:
             await ws.close(code=4401, message=b'unauthorized')
@@ -260,9 +269,11 @@ def register_routes(adapter, app):
         except (ValueError, TypeError, TimeoutError):
             await ws.close(code=4400, message=b'invalid hello')
             return ws
-        socket = XiaozhiSocket(ws, uuid4().hex, version, params)
+        socket = XiaozhiSocket(ws, uuid4().hex, version, params,
+                              on_delivered=lambda mid: adapter._mark_delivered(identity.user, mid))
         conn = Connection(socket, identity, protocol=1,
-                          capabilities={'audio_out': ['audio/mpeg'], 'speaker': True, 'mic': True, 'display': True})
+                          capabilities={'audio_out': ['audio/mpeg'], 'speaker': True, 'mic': True,
+                                        'display': True, 'ack': True})
         recording = None
 
         def submit(frame):
@@ -281,15 +292,15 @@ def register_routes(adapter, app):
                 try:
                     msg = await ws.receive(timeout=timeout)
                 except TimeoutError:
-                    submit(recording.query())
+                    submit(await recording.query())
                     recording = None
                     continue
                 if msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
                     break
                 if msg.type == WSMsgType.BINARY and recording:
                     packet = strip_binary(msg.data, version)
-                    if packet is not None and recording.add(packet):
-                        submit(recording.query())
+                    if packet is not None and len(packet) <= MAX_OPUS_PACKET_BYTES and recording.add(packet):
+                        submit(await recording.query())
                         recording = None
                 elif msg.type == WSMsgType.TEXT:
                     try:
@@ -302,10 +313,9 @@ def register_routes(adapter, app):
                     if kind == 'listen':
                         state = frame.get('state')
                         if state == 'start':
-                            recording = Recording(params, frame.get('mode', 'manual'),
-                                                  int(adapter._max_frame_mb * 1024 * 1024))
+                            recording = Recording(params, frame.get('mode', 'manual'))
                         elif state == 'stop' and recording:
-                            submit(recording.query())
+                            submit(await recording.query())
                             recording = None
                     elif kind == 'abort':
                         recording = None
@@ -320,8 +330,6 @@ def register_routes(adapter, app):
                 await socket.close()
             finally:
                 adapter._release(conn)
-                # Synchronous, like _release: preserve pushes even when socket shutdown is cancelled.
-                adapter.outbox.merge(identity.user, list(socket.unsent.values()))
         return ws
 
     app.router.add_post('/xiaozhi/ota/{token}', ota)

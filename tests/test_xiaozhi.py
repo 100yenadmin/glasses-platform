@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import struct
+import threading
 from unittest.mock import AsyncMock
 
 import pytest
@@ -101,6 +102,16 @@ async def test_bad_websocket_token_and_hello_deadline(server, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('headers', [{}, {'Authorization': 'Bearer '}, {'Authorization': 'Bearer'}])
+async def test_missing_or_empty_bearer_token(server, headers):
+    adapter, client = server
+    ws = await client.ws_connect('/xiaozhi', headers=headers)
+    msg = await ws.receive(timeout=1)
+    assert msg.type == WSMsgType.CLOSE and msg.data == 4401
+    assert not adapter.registry.by_user
+
+
+@pytest.mark.asyncio
 async def test_hello_defaults_capabilities_and_release(server):
     adapter, client = server
     ws = await client.ws_connect('/xiaozhi?token=tok-alice-1')
@@ -110,7 +121,8 @@ async def test_hello_defaults_capabilities_and_release(server):
     assert hello['audio_params'] == {'format': 'opus', 'sample_rate': 24000, 'channels': 1, 'frame_duration': 60}
     conn = adapter.registry.live('alice')[0]
     assert conn.protocol == 1 and conn.ws.version == 1
-    assert conn.capabilities == {'audio_out': ['audio/mpeg'], 'speaker': True, 'mic': True, 'display': True}
+    assert conn.capabilities == {'audio_out': ['audio/mpeg'], 'speaker': True, 'mic': True,
+                                 'display': True, 'ack': True}
     assert conn.flushed
     await ws.close()
     await until(lambda: not adapter.registry.live('alice'))
@@ -149,6 +161,76 @@ async def test_listen_stop_query_and_binary_headers(server, monkeypatch, version
     assert demux_opus(data) == [SPEECH, QUIET]
     assert struct.unpack_from('<I', data, 27 + 1 + 12)[0] == 24000
     assert conn.ws.audio_params == params and conn.ws.version == actual
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('version', [1, 2, 3])
+async def test_oversized_opus_packet_ignored(server, monkeypatch, version):
+    adapter, client = server
+    query = AsyncMock()
+    monkeypatch.setattr(adapter, '_process_query', query)
+    ws, _ = await connect(client, version=version)
+    await record(ws, (b'x' * 1501, SPEECH), version=version)
+    await until(lambda: query.await_count == 1)
+    assert demux_opus(base64.b64decode(query.call_args.args[1]['audio']['data'])) == [SPEECH]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_recording_byte_cap_through_websocket(server, monkeypatch):
+    adapter, client = server
+    query = AsyncMock()
+    monkeypatch.setattr(adapter, '_process_query', query)
+    # Short frames ensure the byte cap, rather than the duration cap, ends this recording.
+    ws, _ = await connect(client, params={'frame_duration': 2.5})
+    await record(ws, [b'x' * 1500] * 161, stop=False)
+    await until(lambda: query.await_count == 1)
+    packets = demux_opus(base64.b64decode(query.call_args.args[1]['audio']['data']))
+    assert len(packets) == 160 and sum(map(len, packets)) == 240000
+    await ws.send_json({'type': 'listen', 'state': 'stop'})
+    await ws.close()
+    await until(lambda: not adapter.registry.by_user)
+    assert query.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_websocket_message_limit(server):
+    adapter, client = server
+    ws, _ = await connect(client)
+    await ws.send_str('x' * (64 * 1024 + 1))
+    msg = await ws.receive(timeout=1)
+    assert msg.type == WSMsgType.CLOSE and msg.data == 1009
+    await until(lambda: not adapter.registry.by_user)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_mid_recording_discards_query_and_registration(server, monkeypatch):
+    adapter, client = server
+    query = AsyncMock()
+    monkeypatch.setattr(adapter, '_process_query', query)
+    ws, _ = await connect(client)
+    conn = adapter.registry.live('alice')[0]
+    await record(ws, stop=False)
+    await ws.close()
+    await until(lambda: not adapter.registry.by_user)
+    assert not query.called and not conn.asking
+
+
+@pytest.mark.asyncio
+async def test_large_recording_mux_runs_off_event_loop(server, monkeypatch):
+    adapter, client = server
+    query, threads = AsyncMock(), []
+    original = xz.mux_opus
+    def capture(*args):
+        threads.append(threading.get_ident())
+        return original(*args)
+    monkeypatch.setattr(adapter, '_process_query', query)
+    monkeypatch.setattr(xz, 'mux_opus', capture)
+    ws, _ = await connect(client)
+    await record(ws, [b'x' * 1000] * 40)
+    await until(lambda: query.await_count == 1)
+    assert threads and all(thread != threading.get_ident() for thread in threads)
     await ws.close()
 
 
@@ -202,14 +284,15 @@ async def test_manual_silence_detect_unknown_and_binary_outside_listen_ignored(s
     await ws.close()
 
 
-def test_recording_duration_and_size_caps():
+@pytest.mark.asyncio
+async def test_recording_duration_and_size_caps():
     recording = xz.Recording({})
     assert not any(recording.add(SPEECH) for _ in range(249))
     assert recording.add(SPEECH)
     limited = xz.Recording({}, max_bytes=100)
     assert not limited.add(SPEECH)
     assert limited.add(SPEECH)
-    assert demux_opus(base64.b64decode(limited.query()['audio']['data'])) == [SPEECH]
+    assert demux_opus(base64.b64decode((await limited.query())['audio']['data'])) == [SPEECH]
 
 
 @pytest.mark.asyncio
@@ -297,7 +380,7 @@ async def test_response_push_audio_order_headers_and_pacing(monkeypatch, version
     assert real.frames == expected and convert.await_count == 2
     assert delays == [0.055] * 4
     assert [call.args for call in convert.await_args_list] == [(b'mp3',), (b'mp3',)]
-    assert ws.unsent == {} and ws.waiting == {}
+    assert ws.waiting == {}
     await ws.close()
 
 
@@ -385,9 +468,9 @@ async def test_other_users_never_reach_device_and_release_requeues_unsent_pushes
     adapter.outbox.append('alice', 'queued reminder', 'cron', 'a')
     ws, _ = await connect(client)
     conn = adapter.registry.live('alice')[0]
-    await until(lambda: 'a' in conn.ws.unsent)
+    await until(lambda: 'a' in conn.unacked)
     await adapter._push('bob', 'private to bob', 'cron', 'b')
-    assert set(conn.ws.unsent) == {'a'}
+    assert set(conn.unacked) == {'a'}
     assert conn.ws.queue.empty() or conn.ws.queue.qsize() == 1
     assert [item[1] for item in adapter.outbox.drain('bob')] == ['private to bob']
     await ws.close()
@@ -395,6 +478,91 @@ async def test_other_users_never_reach_device_and_release_requeues_unsent_pushes
     await until(lambda: bool(adapter.outbox._items.get('alice')))
     assert not adapter.registry.by_user.get('alice')
     assert [item[1:] for item in adapter.outbox.drain('alice')] == [('queued reminder', 'cron', 'a')]
+
+
+async def start_push(server, monkeypatch):
+    adapter, client = server
+    monkeypatch.setattr(adapter, '_speak', lambda *args: None)
+    monkeypatch.setattr(xz, 'transcode', AsyncMock(return_value=[b'one', b'two']))
+    ws, _ = await connect(client)
+    conn = adapter.registry.live('alice')[0]
+    conn.ws.pace = 0
+    resume, send_bytes = asyncio.Event(), conn.ws.ws.send_bytes
+    async def gated_send(packet):
+        await send_bytes(packet)
+        await resume.wait()
+    monkeypatch.setattr(conn.ws.ws, 'send_bytes', gated_send)
+    await adapter._push('alice', 'reminder', 'cron', 'p')
+    await conn.send_json({'type': 'audio', 'ref': 'p', 'mime': 'audio/mpeg', 'data': 'bXAz'})
+    assert (await ws.receive_json(timeout=1))['state'] == 'start'
+    assert (await ws.receive_json(timeout=1))['state'] == 'sentence_start'
+    assert (await ws.receive(timeout=1)).data == b'one'
+    return ws, conn, resume
+
+
+@pytest.mark.asyncio
+async def test_mid_tts_disconnect_then_v0_held_disconnect_keeps_push(server, monkeypatch):
+    adapter, client = server
+    ws, _, _ = await start_push(server, monkeypatch)
+    await ws.close()
+    await until(lambda: not adapter.registry.by_user)
+    monkeypatch.setattr(adapter, '_process_query', AsyncMock())
+    legacy = await client.ws_connect('/voice?token=tok-alice-1')
+    assert (await legacy.receive_json(timeout=1))['type'] == 'welcome'
+    await legacy.send_json({'type': 'query', 'id': 'q', 'text': 'question in flight'})
+    await until(lambda: bool(adapter.registry.live('alice')[0].held))
+    await legacy.close()
+    await until(lambda: not adapter.registry.by_user)
+    assert [item[3] for item in adapter.outbox._items['alice']] == ['p']
+    assert json.loads(adapter.outbox.path.read_text())['alice'][0][3] == 'p'
+    assert 'p' not in adapter._delivered.get('alice', ())
+
+
+@pytest.mark.asyncio
+async def test_completed_tts_push_marks_delivered_and_removes_persisted_outbox(server, monkeypatch):
+    adapter, _ = server
+    ws, conn, resume = await start_push(server, monkeypatch)
+    assert json.loads(adapter.outbox.path.read_text())['alice'][0][3] == 'p'
+    assert 'p' not in adapter._delivered.get('alice', ())
+    resume.set()
+    assert (await ws.receive(timeout=1)).data == b'two'
+    assert (await ws.receive_json(timeout=1))['state'] == 'stop'
+    await asyncio.wait_for(conn.ws.worker, 1)
+    assert 'p' in adapter._delivered['alice'] and not conn.unacked
+    assert json.loads(adapter.outbox.path.read_text()) == {}
+    await ws.close()
+    await until(lambda: not adapter.registry.by_user)
+    assert not adapter.outbox._items.get('alice')
+
+
+@pytest.mark.asyncio
+async def test_aborted_push_requeued_on_close(server, monkeypatch):
+    adapter, _ = server
+    ws, conn, _ = await start_push(server, monkeypatch)
+    await ws.send_json({'type': 'abort'})
+    assert (await ws.receive_json(timeout=1))['state'] == 'stop'
+    assert conn.ws.worker.cancelled()
+    await ws.close()
+    await until(lambda: not adapter.registry.by_user)
+    assert [item[3] for item in adapter.outbox._items['alice']] == ['p']
+    assert json.loads(adapter.outbox.path.read_text())['alice'][0][3] == 'p'
+    assert 'p' not in adapter._delivered.get('alice', ())
+
+
+@pytest.mark.asyncio
+async def test_large_transcode_demux_runs_off_event_loop(monkeypatch):
+    output = xz.mux_opus([b'x' * 1000] * 40)
+    child = AsyncMock()
+    child.returncode = 0
+    child.communicate.return_value = (output, b'')
+    monkeypatch.setattr(xz.asyncio, 'create_subprocess_exec', AsyncMock(return_value=child))
+    original, threads = xz.demux_opus, []
+    def capture(data):
+        threads.append(threading.get_ident())
+        return original(data)
+    monkeypatch.setattr(xz, 'demux_opus', capture)
+    assert await xz.transcode(b'mp3') == [b'x' * 1000] * 40
+    assert threads and all(thread != threading.get_ident() for thread in threads)
 
 
 @pytest.mark.asyncio

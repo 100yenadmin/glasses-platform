@@ -87,6 +87,10 @@ Run `hermes glasses pair me voicebox --xiaozhi` (add `--host` / `--port` if need
 Paste the printed OTA address into the device's Wi-Fi setup page, under advanced settings → "OTA address".
 Push to talk and hear the answer; server speech needs `ffmpeg` installed on the gateway.
 Reminders play the next time the device opens its connection: xiaozhi devices only connect while talking.
+They stay in the outbox until the bridge sends the normal playback `tts stop`; aborted or disconnected playback
+is queued again on disconnect. This records socket delivery, not proof that the device played the sound.
+Recordings stop at 15 seconds or 240,000 encoded Opus bytes (15 s × 16 kB/s). Opus packets over 1,500 bytes are
+ignored; WebSocket messages are limited to 64 KiB. Ogg container work at 32 KiB or above runs in a worker thread.
 
 <details><summary>Setting tokens by hand</summary>
 
