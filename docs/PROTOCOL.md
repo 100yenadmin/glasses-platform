@@ -4,7 +4,7 @@ Status: **v1, extended in 0.4.0** (sections marked *planned* are specified but n
 
 - **Transport:** one WebSocket per device at `ws(s)://<host>:<port><path>`. The default is `:8765/voice`.
 - **Frames:** UTF-8 JSON text frames, each an object with a `type` field. Binary data (photos, audio) travels
-  base64-encoded inside JSON. Devices that cannot hold a WebSocket use the [HTTP route](#http-route-planned).
+  base64-encoded inside JSON. Devices that cannot hold a WebSocket use the [HTTP route](#http-route).
 
 ## Authentication
 
@@ -195,7 +195,7 @@ the push stays in the server's queue: if the device disconnects first, the push 
 connect. Devices that do not declare `ack` keep the default: a push counts as delivered once it is written to
 the socket.
 
-## HTTP route (planned)
+## HTTP route
 
 For devices that cannot keep a WebSocket open (Apple Watch, Garmin, Siri Shortcuts, scripts). Same listener, same
 device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
@@ -211,8 +211,10 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   `{"items":[<push frames>]}` as soon as there is at least one, or an empty list at the deadline. Pushes are
   removed from the queue once they are in an answer.
 - `POST /approval` with `{"id","choice"}` answers like `approval_response` and returns the `approval_result`.
-- While a request is open the device counts as connected, so pushes for it go into that request's answer instead
-  of the queue. A request that has already answered never loses a push: anything that arrives later waits in the
+- Each request is its own short-lived connection: it never replaces the device's WebSocket or another open request.
+  While it is open the device counts as connected, so pushes for it go into that request's answer instead of the
+  queue. If the answer cannot be written (the client went away), its pushes and the turn's reply go back to the
+  queue. A request that has already answered never loses a push: anything that arrives later waits in the
   queue for the next request.
 - Status codes: `401` bad or missing token, `400` malformed body, `413` too large, `202` still running.
 

@@ -37,6 +37,8 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
   Hermes's own text-to-speech.
 - **Approve with a button.** Devices with buttons (a watch, a touchpad, a ring) get the approval as a card with
   Hermes's choices; the answer is bound to that one request.
+- **Ask from your wrist.** Devices that cannot keep a connection open (an Apple Watch through a Siri Shortcut,
+  scripts) use plain HTTP: `POST /turn` and `GET /pending`. See [docs/devices/apple-watch.md](docs/devices/apple-watch.md).
 - **One conversation on every device.** Glasses and phone share one Hermes session per person: memory, schedules and
   tools are the same everywhere.
 - **Set up in one command, try it without glasses.** `hermes glasses pair` prints a connect URL and QR code;
@@ -138,7 +140,8 @@ short offline queue until a device reconnects.
 
 ## What it does on your machine
 
-- **Opens a network listener.** A WebSocket server on all interfaces, port 8765, path `/voice` (set `GLASSES_HOST`
+- **Opens a network listener.** A WebSocket server on all interfaces, port 8765, path `/voice`, plus the HTTP
+  routes `/turn`, `/pending` and `/approval` on the same port and with the same tokens (set `GLASSES_HOST`
   to `127.0.0.1` to keep it local). It refuses to start until at least one device token is configured.
 - **A device token is full access to your agent.** Anyone holding one can chat with your agent as you, and can answer
   the approval prompts and clarify questions the agent sends to your devices. Keep tokens long, random and private.

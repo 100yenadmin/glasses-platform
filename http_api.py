@@ -35,6 +35,7 @@ def _capabilities(body):
     capabilities = (body or {}).get('capabilities')
     capabilities = dict(capabilities) if isinstance(capabilities, dict) else {}
     capabilities.pop('camera', None)  # a request cannot answer capture_photo
+    capabilities.pop('ack', None)  # the HTTP answer itself is the delivery
     return capabilities
 
 
@@ -107,8 +108,12 @@ async def _send(request, adapter, user, response, frames, reply=None):
 
 
 async def handle_approval(adapter, conn, body):
-    # TODO(approval lane): validate and dispatch the shared approval_response handler.
-    return web.json_response({'error': 'not yet'}, status=501)
+    """`POST /approval`: the same checks as a WebSocket `approval_response` (this user's live request, Hermes's own
+    choices); answers with the `approval_result`."""
+    await adapter._button_approval(conn, {'id': body.get('id'), 'choice': body.get('choice')})
+    result = next((frame for frame in conn.ws.frames if frame.get('type') == 'approval_result'), None)
+    return web.json_response(result or {'type': 'approval_result', 'id': body.get('id'), 'ok': False,
+                                        'message': 'Unknown approval.'})
 
 
 class HttpApi:

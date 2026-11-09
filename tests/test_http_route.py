@@ -407,21 +407,29 @@ async def test_audio_wait_is_bounded_and_text_survives_missing_audio(server, mon
     assert waits == [50, 15]
 
 
-async def test_approval_stub_and_hook(server, monkeypatch):
+async def test_approval_route_uses_the_button_checks(server, monkeypatch):
     adapter, client = server
-    response = await client.post('/approval', headers=AUTH, json={'id': 'a1', 'choice': 'once'})
-    assert response.status == 501 and await response.json() == {'error': 'not yet'}
-    assert not adapter.registry.live('alice')
+    queues = {'agent:main:glasses:dm:alice': ['r1']}
+    calls = []
 
-    async def approval(adapter_arg, conn, body):
-        assert adapter_arg is adapter and conn in adapter.registry.live('alice')
-        assert conn.protocol == 1 and conn.capabilities == {'buttons': True}
-        assert body == {'id': 'a1', 'choice': 'deny', 'capabilities': {'buttons': True}}
-        return http_api.web.json_response({'ok': True})
-    monkeypatch.setattr(http_api, 'handle_approval', approval)
-    response = await client.post('/approval', headers=AUTH,
-                                 json={'id': 'a1', 'choice': 'deny', 'capabilities': {'buttons': True}})
-    assert await response.json() == {'ok': True}
+    def resolve(key, choice, request_id=None):
+        calls.append((key, choice, request_id))
+        if request_id in queues.get(key, []):
+            queues[key].remove(request_id)
+            return 1
+        return 0
+    monkeypatch.setattr('tools.approval.list_gateway_approvals', lambda key: [{'request_id': i} for i in queues.get(key, [])])
+    monkeypatch.setattr('tools.approval.resolve_gateway_approval', resolve)
+    from glasses_plugin.adapter import Approval
+    adapter._approvals['alice'] = [Approval('agent:main:glasses:dm:alice', 'r1', ['once', 'deny'], 0, shown=True)]
+    bad = await (await client.post('/approval', headers=AUTH, json={'id': 'r1', 'choice': 'always'})).json()
+    assert bad['ok'] is False and calls == []
+    unknown = await (await client.post('/approval', headers=AUTH, json={'id': 'nope', 'choice': 'once'})).json()
+    assert unknown['ok'] is False
+    good = await (await client.post('/approval', headers=AUTH, json={'id': 'r1', 'choice': 'once'})).json()
+    assert good['ok'] is True and good['choice'] == 'once'
+    assert calls == [('agent:main:glasses:dm:alice', 'once', 'r1')]
+    assert not adapter.registry.live('alice')
 
 
 @pytest.mark.parametrize('raw', ['', '[]', '{'])
