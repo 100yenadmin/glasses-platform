@@ -80,23 +80,24 @@ connect. See [docs/DEVICES.md](docs/DEVICES.md) for the device survey behind thi
 **Exit criteria:** the conformance kit passes against the plugin over both the WebSocket and the HTTP route, and
 two different device classes complete a real-device session.
 
-## M5 — Device bridges (in priority order)
+## M5–M11 — Device bridges, in order of reach
 
-- [ ] **Even Realities G2:** an Even Hub web app on our protocol (glasses mic, display, touchpad and ring for
+Each bridge has its own GitHub milestone. **Exit criteria per bridge:** a recorded real-device session with pass
+rates. Simulator runs prove the server side only.
+
+- **M5 — Apple Watch and Siri Shortcuts** (largest smartwatch base): a Shortcut on the HTTP route first (tested on a
+  real watch), then a watchOS app with push notifications.
+- **M6 — ESP32 voice boxes:** a xiaozhi-compatible endpoint (its WebSocket hello, Opus audio, abort), covering the
+  138+ boards of the open-source xiaozhi firmware. Needs M1 voice in and out.
+- **M7 — Even Realities G2:** an Even Hub web app on our protocol (glasses mic, display, touchpad and ring for
   approvals, pushes). Beta testers need no store review.
-- [ ] **ESP32 voice boxes:** a xiaozhi-compatible endpoint (its WebSocket hello, Opus audio, abort), which covers
-  the 138+ boards that the open-source xiaozhi firmware supports. Needs M1 voice in and out.
-- [ ] **Apple Watch:** a Siri Shortcut on the HTTP route first (test it on a real watch), then a watchOS app with
-  push notifications.
-- [ ] **Pebble:** point the open-source Bobby assistant's phone-side WebSocket at our protocol.
-- [ ] **Omi pendant:** an Omi app that receives live transcripts by webhook and feeds the user's session.
-- [ ] **Meta Ray-Ban / Ray-Ban Display:** via the hermes-glasses app (M2); public reach waits on Meta opening its
-  device toolkit to everyone.
-- [ ] **Mentra Live and MentraOS glasses** (also G1, G2 and Vuzix through MentraOS).
-- [ ] **Wear OS and Android Auto:** one Android reference client; Android Auto shows its messages for free.
-- [ ] **Meta AI Connectors MCP endpoint** (`ask_hermes`, `hermes_task_status`), gated on Meta early access.
+- **M8 — Omi pendant:** an Omi app that receives live transcripts by webhook and feeds the user's session.
+- **M9 — Android: Wear OS and Android Auto:** one Android reference client; Android Auto shows its messages.
+- **M10 — Pebble:** point the open-source Bobby assistant's phone-side WebSocket at our protocol.
+- **M11 — Mentra glasses:** Mentra Live and MentraOS (also G1, G2 and Vuzix through MentraOS).
 
-**Exit criteria per bridge:** a recorded real-device session with pass rates. Simulator runs do not count.
+Meta Ray-Ban stays M2 (via hermes-glasses); public reach waits on Meta opening its device toolkit. The Meta AI
+Connectors MCP endpoint (`ask_hermes`, `hermes_task_status`) is on the watch list, gated on Meta early access.
 
 ## Covered elsewhere, so not built here
 
@@ -106,7 +107,7 @@ two different device classes complete a real-device session.
 
 ## Watch list
 
-Android XR glasses (Jetpack Projected, alpha), Brilliant Labs Halo, Snap Specs, Rabbit R1 (rabbitOS agent),
+Meta AI Connectors, Android XR glasses (Jetpack Projected, alpha), Brilliant Labs Halo, Snap Specs, Rabbit R1 (rabbitOS agent),
 Garmin (Connect IQ 9.3 microphone access), CarPlay (needs Apple's entitlement), Ray-Ban Meta Gen 3 once the toolkit
 supports it.
 
