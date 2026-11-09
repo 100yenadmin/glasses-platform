@@ -98,19 +98,37 @@ test('errors and disconnect reject operations, duplicate ids do not overwrite', 
   await assert.rejects(client.ask({text: 'offline'}), /Not connected/);
 });
 
-test('errors without query text reject a pending reset too', async () => {
+test('a query error leaves a pending reset; its own failure or an error with nothing in flight rejects it', async () => {
   const {client, socket} = setup();
   const query = assert.rejects(client.ask({id: 'one'}), /empty/);
   const resetPromise = client.newSession();
   assert.equal(resetPromise, client.newSession());
-  const resetError = assert.rejects(resetPromise, /empty/);
-  socket.frame({type: 'error', message: 'empty'});
+  socket.frame({type: 'error', message: 'empty'});  // the query's error, not the reset's
   await query;
-  await resetError;
+  socket.frame({type: 'session_reset'});
+  await resetPromise;
   assert.equal(client.resetWait, null);
   const reset = assert.rejects(client.newSession(), /reset failed/);
-  socket.frame({type: 'error', message: 'reset failed'});
+  socket.frame({type: 'error', message: 'reset failed'});  // nothing in flight: it is the reset's
   await reset;
+  client.disconnect();
+});
+
+test('timeout null means no deadline; interrupt resolves an ask that already has its text', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const {client, socket} = setup({serverFeatures: ['audio_out'],
+    device: {name: 'audio', capabilities: {audio_out: ['audio/wav']}}});
+  let settled = false;
+  const open = client.ask({id: 'open', timeout: null}).finally(() => { settled = true; });
+  t.mock.timers.tick(1);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  socket.frame({type: 'response', turn: 'open', text: 'kept'});  // now waiting only for audio
+  client.interrupt({ask: 'open'});
+  assert.equal((await open).text, 'kept');
+  const stopId = [...client.interrupts][0];
+  socket.frame({type: 'response', turn: stopId, text: 'Stopped.'});
+  assert.equal(client.interrupts.size, 0);  // the /stop reply clears its id
   client.disconnect();
 });
 

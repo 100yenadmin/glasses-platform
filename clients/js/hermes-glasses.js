@@ -102,7 +102,7 @@ export class HermesGlassesClient {
       this.queries.set(id, pending);
       if (signal?.aborted) { abort(); return; }
       signal?.addEventListener('abort', abort, {once: true});
-      if (timeout !== 0) pending.deadline = setTimeout(() =>
+      if (timeout) pending.deadline = setTimeout(() =>
         this.finish(id, Object.assign(new Error('Query timed out.'), {code: 'timeout'})), timeout);
       try { this.send({type: 'query', id, text, audio, image, speak}); }
       catch (error) { this.finish(id, error); }
@@ -133,7 +133,9 @@ export class HermesGlassesClient {
     this.interrupts.add(id);
     this.send({type: 'interrupt', id});
     const stopped = ask ?? [...this.queries].find(([, query]) => !query.result && !query.slash)?.[0];
-    this.finish(stopped, Object.assign(new Error('Query interrupted.'), {code: 'interrupted'}));
+    // An ask that already has its text (waiting only for audio) is resolved with it, not rejected.
+    this.finish(stopped, this.queries.get(stopped)?.result
+      ? undefined : Object.assign(new Error('Query interrupted.'), {code: 'interrupted'}));
   }
   answerApproval(id, choice) {
     if (this.approvals.has(id)) return Promise.reject(new Error('Approval answer already pending.'));
@@ -162,7 +164,7 @@ export class HermesGlassesClient {
         this.emit('connected', frame);
         break;
       case 'response':
-        if (this.interrupts.has(id) || !pending || pending.result) break;
+        if (this.interrupts.delete(id) || !pending || pending.result) break;  // a /stop reply settles nothing
         pending.result = {id, text: frame.text};
         if (pending.transcript !== undefined) pending.result.transcript = pending.transcript;
         if (this.device.capabilities?.audio_out?.length && pending.speak !== false &&
@@ -189,12 +191,13 @@ export class HermesGlassesClient {
         // Uncorrelated errors are operation-wide; never guess which concurrent query failed.
         const error = new Error(frame.message || 'Server error.');
         const correlated = frame.turn ?? frame.id;
-        const hasText = [...this.queries.values()].some(query => query.result);
+        const inFlight = this.queries.size;
         const entries = correlated === undefined ? [...this.queries] : [[correlated, this.queries.get(correlated)]];
         for (const [key, query] of entries) if (query) {
           this.finish(key, query.result ? undefined : error);
         }
-        if (frame.message === 'New session failed.' || !hasText) {
+        // A query's error is not the reset's: reject the reset only for its own failure or with no query in flight.
+        if (frame.message === 'New session failed.' || inFlight === 0) {
           this.resetWait?.reject(error); this.resetWait = null;
         }
         this.emit('error', frame);
