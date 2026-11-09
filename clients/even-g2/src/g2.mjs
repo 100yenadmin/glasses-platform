@@ -1,12 +1,13 @@
 import {HermesGlassesClient} from '../../js/hermes-glasses.js';
 export const LENS_CHARS = 400;
+const PROMPT_HEIGHT = 112;  // approval page: the request text above the choices
 export function label63(value) {
   let out = '';
   for (const char of String(value)) { if (new TextEncoder().encode(out + char).length > 63) break; out += char; }
   return out;
 }
 export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSocketImpl = globalThis.WebSocket) {
-  let client, turn = false, recording = false, micBusy = false, closed = false, timer, renderTimer, pushTimer;
+  let client, turn = false, recording = false, micBusy = false, closed = false, timer, renderTimer, pushTimer, pushing = false;
   let transcript = '', answer = '', content = textBox.content, state = '', approval, selected = 0, page = 'text';
   let queue = Promise.resolve();
   const pushes = [], approvals = [];
@@ -32,14 +33,22 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       show('approval', approval.text || 'Hermes approval');
       const request = approval;
       serial(async () => {
+        // What is being approved stays on the lens above the choices; only the list takes touchpad events.
         const {content: _text, ...frame} = textBox;  // the bridge rejects text-only fields on a list container
-        await bridge.rebuildPageContainer({containerTotalNum: 1, listObject: [{...frame, containerName: 'choices',
-          itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
+        const prompt = String(request.text || 'Hermes approval');
+        await bridge.rebuildPageContainer({containerTotalNum: 2,
+          textObject: [{...textBox, containerID: 2, containerName: 'prompt', yPosition: 0, height: PROMPT_HEIGHT,
+            isEventCapture: 0, content: prompt.length > 160 ? prompt.slice(0, 159) + '…' : prompt}],
+          listObject: [{...frame, containerID: 1, containerName: 'choices', yPosition: PROMPT_HEIGHT,
+            height: textBox.height - PROMPT_HEIGHT, isEventCapture: 1,
+            itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
         page = 'list';
       });
+    } else if (pushing) {
+      // A push is on the lens: its own timer shows the next one.
     } else if (!turn && !recording && pushes.length) {
       const push = pushes.shift(); show('push', `${push.origin === 'cron' ? 'Reminder' : 'Hermes'}\n${push.text}`);
-      clearTimeout(pushTimer); pushTimer = setTimeout(next, 4000);
+      pushing = true; clearTimeout(pushTimer); pushTimer = setTimeout(() => { pushing = false; next(); }, 4000);
     } else show(state || 'answer', content);
   }
   function dismiss(id) {
@@ -53,7 +62,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     turn = true; transcript = ''; answer = ''; show('thinking', 'Thinking…');
     try { const result = await client.ask({...query, speak: false}); transcript = result.transcript || transcript; answer = result.text; show('answer', `${transcript}\n${answer}`); }
     catch { fail(); }
-    finally { turn = false; if (!closed) { clearTimeout(pushTimer); pushTimer = setTimeout(next, 1500); } }
+    finally { turn = false; pushing = false; if (!closed) { clearTimeout(pushTimer); pushTimer = setTimeout(next, 1500); } }
   }
   async function tap() {
     if (micBusy || closed) return;
@@ -94,6 +103,8 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       client.on('transcript', frame => { transcript = frame.text; });
       client.on('delta', frame => { answer = frame.text; show('answer', `${transcript}\n${answer}`); });
       client.on('push', frame => { pushes.push(frame); if (!turn && !recording && !approval) next(); });
+      // glasses_show_text: shown like a push, after the turn and between other pushes.
+      client.on('display', frame => { pushes.push({origin: 'display', text: frame.text}); if (!turn && !recording && !approval) next(); });
       client.on('approval_request', frame => {
         if (!Array.isArray(frame.choices) || !frame.choices.length || frame.choices.length > 20) { fail(); return; }
         approvals.push({...frame, choices: frame.choices}); next();
