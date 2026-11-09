@@ -41,6 +41,7 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   const long = '界'.repeat(30);
   socket.frame({type: 'approval_request', id: 'a', choices: ['once', long]}); await flush();
   assert.equal(Buffer.byteLength(pages.at(-1).listObject[0].itemContainer.itemName[1]), 63);
+  assert.ok(!('content' in pages.at(-1).listObject[0]));  // the real bridge rejects unknown list fields
   app.select(1); const choice = app.tap(); await flush();
   assert.deepEqual(socket.sent.at(-1), {type: 'approval_response', id: 'a', choice: long});
   socket.frame({type: 'approval_result', id: 'a', ok: true}); await choice;

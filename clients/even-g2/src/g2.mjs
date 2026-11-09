@@ -32,7 +32,8 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       show('approval', approval.text || 'Hermes approval');
       const request = approval;
       serial(async () => {
-        await bridge.rebuildPageContainer({containerTotalNum: 1, listObject: [{...textBox, containerName: 'choices',
+        const {content: _text, ...frame} = textBox;  // the bridge rejects text-only fields on a list container
+        await bridge.rebuildPageContainer({containerTotalNum: 1, listObject: [{...frame, containerName: 'choices',
           itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
         page = 'list';
       });
