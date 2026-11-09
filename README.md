@@ -5,7 +5,7 @@
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.2.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.2.1 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
@@ -21,6 +21,19 @@ channel, the same way Hermes already talks to Telegram or Slack.
 ```
 glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform) ─▶ your agent
 ```
+
+## What you can do with it
+
+- **Ask about what you see.** "What am I looking at?" takes a photo through the glasses before the question reaches
+  the model. The agent can also decide to look by itself with its `glasses_capture_photo` tool.
+- **Hear back later.** Reminders, cron jobs and heartbeat results arrive on your glasses as pushes. If no device is
+  connected they wait, and arrive when one reconnects.
+- **Approve by voice.** When the agent wants to run a dangerous command, the glasses ask "Hermes wants to run: …
+  Say yes to allow it once, or no to block it." A spoken yes or no answers that one request.
+- **One conversation on every device.** Glasses and phone share one Hermes session per person: memory, schedules and
+  tools are the same everywhere.
+- **Set up in one command, try it without glasses.** `hermes glasses pair` prints a connect URL and QR code;
+  `hermes glasses try` talks to your agent from the terminal as a pair of glasses with a camera.
 
 ## Planned support
 
