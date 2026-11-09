@@ -53,7 +53,7 @@ async def test_wake_becomes_existing_v1_query_and_reply(server, monkeypatch, wak
     adapter, client = server
     connections = watch_connections(adapter, monkeypatch)
     reply_with(adapter, 'It is noon.')
-    assert await post(client, segment(wake + 'what time is it')) == {'message': 'It is noon.'}
+    assert await post(client, segment(wake + 'what time is it')) == {'message': 'Hermes: It is noon.'}
     event = adapter.handle_message.call_args.args[0]
     assert event.text == 'what time is it'
     assert event.source.chat_id == 'alice'  # uid is ignored
@@ -67,7 +67,7 @@ async def test_wake_alone_collects_next_segments_in_same_session(server):
     reply_with(adapter)
     assert await post(client, segment('Hey Hermes!')) == {}
     assert await post(client, segment('unrelated', 1), url=URL.replace('live', 'other')) == {}
-    assert await post(client, segment('what time', 1), segment('is it', 2)) == {'message': 'Hello back.'}
+    assert await post(client, segment('what time', 1), segment('is it', 2)) == {'message': 'Hermes: Hello back.'}
     assert adapter.handle_message.call_args.args[0].text == 'what time is it'
     assert await post(client, segment('just talking', 3)) == {}
     assert adapter.handle_message.await_count == 1
@@ -83,7 +83,7 @@ async def test_wake_alone_has_eight_second_deadline(server, monkeypatch, delay, 
     assert await post(client, segment('Hermes')) == {}
     now[0] += delay
     result = await post(client, segment('tell me the time', 1))
-    assert result == ({'message': 'Hello back.'} if answered else {})
+    assert result == ({'message': 'Hermes: Hello back.'} if answered else {})
     assert adapter.handle_message.await_count == int(answered)
 
 
@@ -91,10 +91,10 @@ async def test_user_segments_win_when_present_and_fallback_includes_all_speakers
     adapter, client = server
     reply_with(adapter)
     assert await post(client, segment('Hey Hermes, wrong', is_user=False),
-                      segment('Hey Hermes, right', 1, is_user=True)) == {'message': 'Hello back.'}
+                      segment('Hey Hermes, right', 1, is_user=True)) == {'message': 'Hermes: Hello back.'}
     assert adapter.handle_message.call_args.args[0].text == 'right'
     assert adapter.handle_message.await_count == 1
-    assert await post(client, segment('Hey Hermes, fallback', 2, is_user=False)) == {'message': 'Hello back.'}
+    assert await post(client, segment('Hey Hermes, fallback', 2, is_user=False)) == {'message': 'Hermes: Hello back.'}
     assert adapter.handle_message.call_args.args[0].text == 'fallback'
 
 
@@ -105,7 +105,7 @@ async def test_non_user_cannot_wake_or_complete_when_user_present(server):
     assert await post(client, segment('question', 2)) == {}
     assert await post(client, segment('Hermes', 3, is_user=True)) == {}
     assert await post(client, segment('wrong', 4, is_user=False), segment('right', 5, is_user=True)) == {
-        'message': 'Hello back.'}
+        'message': 'Hermes: Hello back.'}
     assert adapter.handle_message.call_args.args[0].text == 'right'
 
 
@@ -113,7 +113,7 @@ async def test_duplicate_segments_ignored_within_and_between_calls(server):
     adapter, client = server
     reply_with(adapter)
     question = segment('Hey Hermes, tell me the time')
-    assert await post(client, question, question) == {'message': 'Hello back.'}
+    assert await post(client, question, question) == {'message': 'Hermes: Hello back.'}
     assert await post(client, question) == {}
     assert adapter.handle_message.await_count == 1
     # The key includes both start and text, and is scoped to the session.
@@ -130,7 +130,7 @@ async def test_buffer_and_seen_segments_are_isolated_by_device_identity(server):
     assert await post(client, segment('Hermes')) == {}
     for token in ('tok-alice-2', 'tok-bob-1'):
         assert await post(client, segment('private continuation', 1), url=URL.replace('tok-alice-1', token)) == {}
-    assert await post(client, segment('our question', 1)) == {'message': 'Hello back.'}
+    assert await post(client, segment('our question', 1)) == {'message': 'Hermes: Hello back.'}
     await post(client, segment('Hey Hermes, hello', 2))
     await post(client, segment('Hey Hermes, hello', 2), url=URL.replace('tok-alice-1', 'tok-bob-1'))
     assert adapter.handle_message.await_count == 3
@@ -151,7 +151,7 @@ async def test_slow_reply_arrives_on_next_call(server, monkeypatch):
     assert not adapter.registry.live('alice')
     resume.set()
     await asyncio.wait_for(finished.wait(), 2)
-    assert await post(client) == {'message': 'The late answer.'}
+    assert await post(client) == {'message': 'Hermes: The late answer.'}
     assert await post(client) == {}
     assert not adapter.outbox._inflight
 
@@ -163,7 +163,7 @@ async def test_queued_pushes_and_reply_join_oldest_first_and_isolate_user(server
     await adapter.send('alice', 'Second reminder.', metadata={'origin': 'cron'})
     reply_with(adapter, 'The answer.')
     assert await post(client, segment('Hey Hermes, hello')) == {
-        'message': 'First reminder.\n\nSecond reminder.\n\nThe answer.'}
+        'message': 'Hermes: First reminder.\n\nSecond reminder.\n\nThe answer.'}
     assert await post(client) == {}
     assert not adapter.outbox._inflight
     assert [item[1] for item in adapter.outbox.drain('bob')] == ['Private reminder.']
@@ -179,7 +179,7 @@ async def test_pushes_remain_tracked_until_answer_is_written(server, monkeypatch
         pending.extend(item[1][1] for item in adapter.outbox._inflight.values())
         return await prepare(response, request)
     monkeypatch.setattr(http_api.web.Response, 'prepare', watched)
-    assert await post(client) == {'message': 'Remember to stretch.'}
+    assert await post(client) == {'message': 'Hermes: Remember to stretch.'}
     assert pending and all(text == 'Remember to stretch.' for text in pending)
     assert adapter.outbox.drain('alice') == [] and not adapter.outbox._inflight
 
@@ -196,26 +196,52 @@ async def test_failed_answer_retains_push_and_reply(server, monkeypatch):
         with pytest.raises(Exception):
             await client.post(URL, json=[segment('Hey Hermes, hello')])
     assert not adapter.registry.live('alice')
-    assert await post(client) == {'message': 'Remember to stretch.\n\nAn answer to keep.'}
+    assert await post(client) == {'message': 'Hermes: Remember to stretch.\n\nAn answer to keep.'}
     assert not adapter.outbox._inflight
 
 
-async def test_message_trimming_only_acknowledges_complete_shown_pushes(server):
+async def test_message_trimming_acknowledges_truncated_push_and_queues_unshown(server):
     adapter, client = server
     oldest, partial, newest = 'A' * 500, 'B' * 600, 'C' * 600
     for text in (oldest, partial, newest):
         await adapter.send('alice', text)
     result = await post(client)
-    assert result == {'message': (oldest + '\n\n' + partial + '\n\n' + newest)[-1000:]}
+    assert result == {'message': 'Hermes: ' + oldest + '\n\n' + partial[:489] + '…'}
     assert len(result['message']) == 1000
-    assert [item[1] for item in adapter.outbox.drain('alice')] == [oldest, partial]
+    assert await post(client) == {'message': 'Hermes: ' + newest}
+    assert await post(client) == {}
 
 
-async def test_oversized_push_is_not_acknowledged_as_fully_delivered(server):
+async def test_oversized_push_is_shown_once_with_its_head(server):
     adapter, client = server
     await adapter.send('alice', 'prefix' + 'x' * 1000)
-    assert await post(client) == {'message': 'x' * 1000}
-    assert [item[1] for item in adapter.outbox.drain('alice')] == ['prefix' + 'x' * 1000]
+    await adapter.send('alice', 'Next reminder.')
+    assert await post(client) == {'message': 'Hermes: prefix' + 'x' * 985 + '…'}
+    assert await post(client) == {'message': 'Hermes: Next reminder.'}
+    assert await post(client) == {}
+
+
+async def test_in_time_reply_keeps_its_head(server):
+    adapter, client = server
+    reply_with(adapter, 'Answer starts here: ' + 'x' * 1000)
+    result = await post(client, segment('Hermes, long answer'))
+    assert result == {'message': 'Hermes: ' + ('Answer starts here: ' + 'x' * 1000)[:991] + '…'}
+    assert await post(client) == {}
+
+
+async def test_reply_without_room_is_queued_for_next_call(server):
+    adapter, client = server
+    await adapter.send('alice', 'x' * 1000)
+    reply_with(adapter, 'Keep my answer.')
+    assert await post(client, segment('Hermes, hello')) == {'message': 'Hermes: ' + 'x' * 991 + '…'}
+    assert await post(client) == {'message': 'Hermes: Keep my answer.'}
+    assert await post(client) == {}
+
+
+async def test_short_reply_is_long_enough_for_omi_notification(server):
+    adapter, client = server
+    reply_with(adapter, '4.')
+    assert await post(client, segment('Hermes, two plus two')) == {'message': 'Hermes: 4.'}
 
 
 @pytest.mark.parametrize('raw', ['{}', 'null', '1', '"text"', '[1]', '[{"text": 2}]', '{'])
@@ -243,7 +269,7 @@ async def test_multiple_wakes_in_one_call_each_start_a_question(server, monkeypa
         await adapter._deliver_reply('alice', conn, frame['id'], 'Answer: ' + frame['text'])
     monkeypatch.setattr(adapter, '_process_query', query)
     assert await post(client, segment('Hey Hermes, first question'), segment('Hermes, second question', 1)) == {
-        'message': 'Answer: first question\n\nAnswer: second question'}
+        'message': 'Hermes: Answer: first question\n\nAnswer: second question'}
     assert asked == ['first question', 'second question']
 
 
@@ -251,7 +277,7 @@ async def test_wake_and_continuation_in_one_call(server):
     adapter, client = server
     reply_with(adapter)
     assert await post(client, segment('Hey Hermes'), segment('tell me', 1), segment('the time', 2)) == {
-        'message': 'Hello back.'}
+        'message': 'Hermes: Hello back.'}
     assert adapter.handle_message.call_args.args[0].text == 'tell me the time'
 
 
@@ -279,7 +305,7 @@ async def test_push_at_finish_is_buffered_or_queued(server, monkeypatch, positio
     result = await post(client)
     await asyncio.gather(*tasks)
     queued = adapter.outbox.drain('alice')
-    assert result == ({'message': 'Boundary reminder.'} if position == 'before_close' else {})
+    assert result == ({'message': 'Hermes: Boundary reminder.'} if position == 'before_close' else {})
     assert [item[1] for item in queued] == ([] if position == 'before_close' else ['Boundary reminder.'])
 
 
@@ -296,7 +322,7 @@ async def test_websocket_is_not_replaced_and_live_push_is_in_answer(server, monk
         await adapter.send('alice', 'Live reminder.', metadata={'origin': 'cron'})
         await adapter._deliver_reply('alice', conn, frame['id'], 'Live answer.')
     monkeypatch.setattr(adapter, '_process_query', query)
-    assert await post(client, segment('Hey Hermes, hello')) == {'message': 'Live reminder.\n\nLive answer.'}
+    assert await post(client, segment('Hey Hermes, hello')) == {'message': 'Hermes: Live reminder.\n\nLive answer.'}
     assert adapter.registry.live('alice') == [websocket]
     assert not websocket.ws.closed
 

@@ -12,6 +12,7 @@ from .http_api import HttpSocket, _finish, _is_push, _reply, _requeue, _send, _t
 WAKE = re.compile(r'^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes\b[\W_]*', re.IGNORECASE)
 FOLLOWUP_SECONDS = 8
 MESSAGE_LIMIT = 1000
+MESSAGE_PREFIX = 'Hermes: '
 
 
 class OmiApi:
@@ -62,8 +63,8 @@ class OmiApi:
 
     @staticmethod
     def _answer(frames, turn_ids):
-        # Keep arrival order (queued pushes precede this turn), dropping the oldest characters first.
-        parts, spans, length = [], [], 0
+        # Keep arrival order and each item's head; even a clipped item counts as shown.
+        parts, shown, length = [], [], len(MESSAGE_PREFIX)
         for frame in frames:
             if not (_is_push(frame) or frame.get('type') == 'response' and frame.get('turn') in turn_ids
                     or frame.get('type') == 'error'):
@@ -71,13 +72,16 @@ class OmiApi:
             text = frame.get('text', frame.get('message', ''))
             if not isinstance(text, str) or not text:
                 continue
-            length += 2 if parts else 0
-            spans.append((frame, length))
+            separator = 2 if parts else 0
+            room = MESSAGE_LIMIT - length - separator
+            if room <= 0:
+                break
+            if len(text) > room:
+                text = text[:room - 1] + '…'
             parts.append(text)
-            length += len(text)
-        message = '\n\n'.join(parts)[-MESSAGE_LIMIT:]
-        # A partially clipped push is still queued: _send only acknowledges complete shown frames.
-        shown = [frame for frame, start in spans if start >= length - MESSAGE_LIMIT]
+            shown.append(frame)
+            length += separator + len(text)
+        message = MESSAGE_PREFIX + '\n\n'.join(parts) if parts else ''
         return web.json_response({'message': message} if message else {}), lambda frame: frame in shown
 
     async def transcript(self, request):
@@ -105,6 +109,11 @@ class OmiApi:
             frames = await _finish(self.adapter, conn)
             reply = '\n\n'.join(_reply(frames, turn_id) or '' for turn_id, _ in turns).strip()
             response, shown = self._answer(frames, turn_ids)
+            omitted = '\n\n'.join(frame['text'] for frame in frames if frame.get('type') == 'response'
+                                 and frame.get('turn') in turn_ids and frame.get('text') and not shown(frame))
+            if omitted:
+                # _send requeues the full reply under this same id if the write fails.
+                self.adapter.outbox.append(identity.user, omitted, 'reply', f'reply-{delivery_id}')
         except BaseException:
             frames = await _finish(self.adapter, conn)
             reply = '\n\n'.join(_reply(frames, turn_id) or '' for turn_id, _ in turns).strip()
