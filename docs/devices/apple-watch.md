@@ -42,8 +42,20 @@ a watch face as a complication.
 - **Approvals.** If the agent needs permission to run a command, the answer is the question ("Hermes wants to run
   ... Say yes to allow it once, or no to block it."). Run the shortcut again and say "yes" or "no".
 - **Long tasks.** If the turn is still running after 50 seconds, the reply is empty and the answer waits in the
-  queue. The next time you ask anything, or from a second shortcut that calls `GET /pending`, you get it.
-- **Reminders** you set from any device wait in the same queue, and the watch picks them up the next time it asks.
+  queue for the "Hermes news" shortcut below.
+- **Reminders** you set from any device wait in the same queue. A plain-text answer never includes them, so they
+  stay queued until "Hermes news" fetches them.
+
+### "Hermes news": reminders and late answers
+
+1. **Get Contents of URL**: URL `http://<your-host>:8765/pending?wait=0`, Method **GET**, Headers
+   `Authorization` = `Bearer <your token>`.
+2. **Get Dictionary Value**: Key `items` in *Contents of URL*.
+3. **Repeat with Each** item in *Dictionary Value*: **Get Dictionary Value** `text` in *Repeat Item*, then
+   **Speak Text** *Dictionary Value*.
+
+Turn on **Show on Apple Watch** for it too ("Hey Siri, Hermes news"). Each item is removed from the queue once it
+has been returned.
 
 ## Check it from a terminal
 

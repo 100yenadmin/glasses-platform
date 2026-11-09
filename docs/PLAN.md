@@ -140,6 +140,7 @@ scoped-secret helpers, never `os.getenv`.
 | auto capture | `GLASSES_AUTO_CAPTURE` | `keywords` | `keywords` or `off` |
 | photo timeout | `GLASSES_PHOTO_TIMEOUT` | `25` | Seconds |
 | v0 push hold | `GLASSES_PUSH_HOLD_SECONDS` | `120` | Longest a push waits for a v0 device's pending answer |
+| HTTP turn wait | `GLASSES_TURN_TIMEOUT` | `50` | Longest `POST /turn` waits for the answer before replying `pending` |
 | max frame | `GLASSES_MAX_FRAME_MB` | `8` | Largest WebSocket frame |
 | outbox | `GLASSES_OUTBOX_MAX` / `GLASSES_OUTBOX_TTL_HOURS` | `50` / `24` | Offline queue |
 | outbox file | `GLASSES_OUTBOX_PERSIST` | `on` | Keep the offline queue in `$HERMES_HOME/glasses/outbox.json` across restarts |

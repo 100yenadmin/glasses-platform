@@ -208,7 +208,8 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   `turn_timeout` seconds (default 50), it answers `202` with `"status":"pending"`, and the reply arrives later
   through `/pending`. With `Accept: text/plain` the body is just the reply text (or the prompts), for Shortcuts;
   pushes it does not show stay queued for `/pending`. A request has no camera, display or haptics: those
-  capabilities are ignored here.
+  capabilities are ignored here. With `audio_out`, a JSON answer carries audio for the turn's reply only, never for
+  pushes.
 - `GET /pending?wait=25` waits up to `wait` seconds (at most 55) for pushes and answers
   `{"items":[<push frames>]}` as soon as there is at least one, or an empty list at the deadline. Pushes are
   removed from the queue once they are in an answer.

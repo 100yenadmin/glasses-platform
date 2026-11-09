@@ -27,17 +27,17 @@ Hermes gateway with real models only; no real glasses or phone app yet (that is 
 
 ## M1 — Complete channel
 
-- [ ] Voice in: devices send audio (`audio` frame, or `query.audio`); the adapter wraps it as WAV and hands it to
+- [x] Voice in (0.4.0): devices send audio (`audio` frame, or `query.audio`); the adapter wraps it as WAV and hands it to
   Hermes as a voice message, so Hermes's own speech-to-text transcribes it. Needed by devices with no speech
   recognition of their own (ESP32 voice boxes, watches, pendants).
 - [ ] Voice out (server-side TTS): implement Hermes's streaming-TTS hooks to send PCM16 frames (24 kHz, or the rate
   the provider reports), plus a whole-reply fallback. Auto-TTS for voice turns follows Hermes's `/voice` setting.
 - [x] Approvals by voice (0.2.0): a dangerous-command approval is asked as a yes/no question, and a spoken "yes"
   (allow once) or "no" answers it.
-- [ ] Native `approval_request` / `approval_response` frames for devices with buttons (watch tap, touchpad, ring),
+- [x] Native `approval_request` / `approval_response` frames (0.4.0) for devices with buttons (watch tap, touchpad, ring),
   bound to Hermes's approval request id (0.23+, with the current fallback on 0.22).
 - [x] `interrupt` → `/stop` (0.2.1)
-- [x] Durable outbox: queued pushes survive a gateway restart (0.3.0); `ack` from v1 devices still planned
+- [x] Durable outbox: queued pushes survive a gateway restart (0.3.0); `ack` from v1 devices (0.4.0)
 - [x] `hermes glasses pair <user> <device>`: mint a device token and print a QR / connect URL (0.2.0), plus
   `devices`, `revoke` and `try` (talk to your agent from the terminal as a pair of glasses with a camera)
 - [ ] CI matrix (pinned Hermes release + main), community kit, product-page README
@@ -65,14 +65,14 @@ The plugin becomes the hub for any device that is not a desktop: glasses, watche
 session per person across all their devices stays the core. Devices differ only in what they can do and how they
 connect. See [docs/DEVICES.md](docs/DEVICES.md) for the device survey behind this plan.
 
-- [ ] Capability declaration: `hello.device.capabilities` becomes a documented list (`camera`, `display` with
+- [x] Capability declaration (0.4.0): `hello.device.capabilities` becomes a documented list (`camera`, `display` with
   size, `speaker`, `mic`, `haptics`, `buttons`, `location`), and the server picks devices by capability. Modelled
   on OpenClaw's node handshake.
-- [ ] Device actions for the agent: generalise `glasses_capture_photo` to show text on a display, buzz, or read
+- [x] Device actions for the agent (0.4.0, display and buzz): generalise `glasses_capture_photo` to show text on a display, buzz, or read
   location, each only on devices that declared it.
-- [ ] HTTP route next to the WebSocket, same tokens: `POST /turn` (text or audio in, one short reply out) and a
+- [x] HTTP route (0.4.0) next to the WebSocket, same tokens: `POST /turn` (text or audio in, one short reply out) and a
   long-poll `GET /pending` for pushes and approvals. For devices that cannot hold a WebSocket: Apple Watch
-  (watchOS only allows plain HTTP outside audio or calls), Garmin, Siri Shortcuts, polling clients.
+  (watchOS allows HTTP(S) requests but WebSockets only during audio or calls), Garmin, Siri Shortcuts, polling clients.
 - [ ] Conformance kit: the simulator's scenarios as a test any client can run against a server, so a third-party
   app can show it works with Hermes.
 - [ ] Small client libraries: JavaScript (browser, Even Hub, Pebble's phone-side JS) and Python first.

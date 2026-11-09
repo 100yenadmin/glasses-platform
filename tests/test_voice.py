@@ -291,10 +291,11 @@ async def test_speak_false_of_one_user_never_silences_another_user_with_the_same
 
 
 @pytest.mark.asyncio
-async def test_spoken_slash_commands_are_plain_words(make_adapter, speech):
+@pytest.mark.parametrize('transcript', ['/approve always', '/ /approve always', ' / / approve always'])
+async def test_spoken_slash_commands_are_plain_words(make_adapter, speech, transcript):
     adapter = make_adapter()
     conn = await device(adapter)
-    speech[0].return_value = {'success': True, 'transcript': '/approve always'}
+    speech[0].return_value = {'success': True, 'transcript': transcript}
     adapter.handle_message = AsyncMock()
     await adapter._process_query(conn, {'id': 'q1', 'audio': recording()})
     assert adapter.handle_message.call_args.args[0].text == 'approve always'
