@@ -17,6 +17,9 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 - **Pebble watch (Bobby).** Build the open-source Bobby assistant with a two-line `urls_override.js` pointing at
   this plugin: Hermes answers stream to the watch, approval questions arrive as text, and queued reminders follow
   the next answer. See [Pebble (Bobby)](README.md#pebble-bobby).
+- **Reused query ids are answered.** Hermes refuses an old message id that arrives with new text, so a device that
+  restarted its id counter (`q1`, `q2`, …) used to wait forever. Each query now reaches Hermes under a fresh id;
+  devices still see their own ids on every reply.
 
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 

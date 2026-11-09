@@ -17,5 +17,6 @@ async def test_interrupt_becomes_stop_for_v1_only(server, version, expected):
     events = [call.args[0] for call in adapter.handle_message.await_args_list]
     assert [e.text for e in events] == expected
     if expected:
-        assert events[0].message_id == 'i1'
+        from glasses_plugin.adapter import _wire_id
+        assert _wire_id(events[0].message_id) == 'i1'
     await ws.close()
