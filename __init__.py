@@ -30,6 +30,9 @@ def register(ctx):
         check_fn=lambda: importlib.util.find_spec('aiohttp') is not None,
         validate_config=configured, install_hint="Requires aiohttp (Hermes 'messaging' extra).",
         **{k: v for k, v in extra.items() if k in supported})
+    for schema, handler in ((tools.SHOW_SCHEMA, tools.show_text), (tools.BUZZ_SCHEMA, tools.buzz)):
+        ctx.register_tool(name=schema['name'], toolset='glasses', schema=schema, handler=handler,
+                          is_async=True, check_fn=tools.available, description=schema['description'], emoji='👓')
     ctx.register_tool(name='glasses_capture_photo', toolset='glasses', schema=tools.SCHEMA,
                       handler=tools.capture_photo, is_async=True, check_fn=tools.available,
                       description=tools.DESCRIPTION, emoji='👓')

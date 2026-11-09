@@ -1,8 +1,10 @@
 """Hermes gateway transport for authenticated smart-glasses companion apps."""
 import asyncio
-from collections import deque
+import base64
+from collections import deque, OrderedDict
 from dataclasses import dataclass, field
 import logging
+import json
 import re
 import time
 from uuid import uuid4
@@ -13,9 +15,10 @@ from gateway.platforms._shared import extra_or_secret
 from gateway.platforms.base import BasePlatformAdapter, SendResult, cache_image_from_bytes_async
 from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 
-from . import protocol
+from . import audio, protocol
 from .capture import PhotoBroker, decode_photo, should_capture_photo
 from .devices import Connection, Outbox, Registry, authenticate, parse_devices
+from .http_api import register_routes
 
 logger = logging.getLogger(__name__)
 ACTIVE = None
@@ -67,6 +70,7 @@ class Approval:
     choices: list
     at: float
     shown: bool = False  # its question has gone out to the devices (or the outbox)
+    connections: set = field(default_factory=set)  # devices that received the button prompt
 
 
 def _outbox_path():
@@ -147,6 +151,8 @@ class GlassesAdapter(BasePlatformAdapter):
         self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
         self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
         self._approval_sessions = {}  # user -> Hermes session keys that have asked this user's devices for approval
+        self._silent, self._speech = {}, OrderedDict()
+        self._speech_slots = asyncio.Semaphore(2)
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -163,6 +169,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._app = web.Application(client_max_size=int(self._max_frame_mb * 1024 * 1024))
         self._app.router.add_get(self._path, self._websocket)
         self._app.router.add_get('/health', self._health)
+        register_routes(self, self._app)
         # Public aiohttp calls, not Hermes' private shared_ingress.bind_listener: glasses is not one of Hermes'
         # port-binding platforms, so its shared-listener mode never applies and the bind is the same.
         # Query credentials must never reach aiohttp's access log.
@@ -252,6 +259,12 @@ class GlassesAdapter(BasePlatformAdapter):
                     await self._flush_outbox(conn)
                 elif kind == 'query':
                     self._spawn(self._process_query(conn, frame))
+                elif kind == 'approval_response' and conn.protocol == 1:
+                    await self._button_approval(conn, frame)
+                elif kind == 'ack' and conn.protocol == 1 and conn.capabilities.get('ack') is True:
+                    message_id = frame.get('id')
+                    if isinstance(message_id, str) and message_id in conn.unacked:
+                        self._mark_delivered(identity.user, message_id)
                 elif kind in ('photo', 'photo_error'):
                     self.broker.resolve(conn, frame)
                 elif kind == 'new_session':
@@ -274,10 +287,11 @@ class GlassesAdapter(BasePlatformAdapter):
         # Never settled or still held: keep its pushes for the next connection, unless another device already
         # received them.
         delivered = self._delivered.get(conn.identity.user, ())
-        left = [*conn.pending, *conn.held]
+        left = [*conn.pending, *conn.held, *conn.unacked.values()]
         self.outbox.merge(conn.identity.user, [item for item in left if item[3] not in delivered])
         self.outbox.forget([item[3] for item in left if item[3] in delivered])
         conn.pending, conn.held = [], []
+        conn.unacked.clear()
 
     async def _new_session(self, conn, query_id=None):
         conn.last_photo_at = 0
@@ -302,11 +316,30 @@ class GlassesAdapter(BasePlatformAdapter):
         live = self.registry.live(conn.identity.user)
         if conn in live:
             return conn
-        return next((other for other in reversed(live) if other.identity == conn.identity), None)
+        return next((other for other in reversed(live) if other.identity == conn.identity and not other.slot), None)
 
     async def _process_query(self, conn, frame, reset=False):
+        self._silent[(conn.identity.user, frame.get('id'))] = frame.get('speak') is False
+        while len(self._silent) > 200:
+            self._silent.pop(next(iter(self._silent)))
         text = frame.get('text', '')
         text = text.strip() if isinstance(text, str) else ''
+        if conn.protocol == 1 and isinstance(frame.get('audio'), dict):
+            try:
+                from gateway.platforms.base import cache_audio_from_bytes_async
+                from tools.transcription_tools import transcribe_audio
+                data, ext = audio.decode(frame['audio'], self.broker.max_bytes)
+                path = await cache_audio_from_bytes_async(data, ext)
+                result = await asyncio.wait_for(asyncio.to_thread(transcribe_audio, path), 40)  # inside the HTTP turn wait
+                text = result.get('transcript', '').strip() if result.get('success') else ''
+                text = re.sub(r'^[\s/]+', '', text)  # speech never issues slash commands (the stop button is `interrupt`)
+                if not text:
+                    raise ValueError('Empty transcript')
+                await conn.send_json(protocol.transcript(frame.get('id'), text))
+            except Exception:
+                await conn.send_json(protocol.error("I couldn't hear that."))
+                await self._answered(conn, frame.get('id'))
+                return
         if not text:
             await conn.send_json(protocol.error('Empty query.'))
             await self._answered(conn, frame.get('id'))
@@ -347,7 +380,7 @@ class GlassesAdapter(BasePlatformAdapter):
                 text = '(No photo could be captured from the glasses.) ' + text
         if photo:
             conn.last_photo_at = time.monotonic()
-        raw = {k: v for k, v in frame.items() if k not in ('image', 'data')}
+        raw = {k: v for k, v in frame.items() if k not in ('image', 'audio', 'data')}
         event = MessageEvent(
             text=text, message_type=MessageType.PHOTO if path else MessageType.TEXT,
             source=self.build_source(chat_id=user, chat_name=user, chat_type='dm', user_id=user, user_name=user),
@@ -356,6 +389,8 @@ class GlassesAdapter(BasePlatformAdapter):
         event._glasses_connection = conn  # retained through Hermes startup replay
         event._glasses_reset = reset
         await self.handle_message(event)
+        if text.startswith(('/approve', '/deny')):
+            self._live_approvals(user)
 
     def _targets(self, user):
         # During a turn only the asking device gets its deltas, status and reply.
@@ -379,10 +414,8 @@ class GlassesAdapter(BasePlatformAdapter):
                     _, text, origin, message_id = item
                     if self._holds(conn, origin):
                         self._hold(conn, item)
-                    elif not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
+                    elif not await self._write_push(conn, item):
                         break
-                    else:
-                        self._mark_delivered(user, message_id)
                     sent += 1
             finally:
                 if sent < len(items):  # closed or cancelled: keep the rest queued, retry on the next frame
@@ -393,7 +426,28 @@ class GlassesAdapter(BasePlatformAdapter):
 
     def _mark_delivered(self, user, message_id):
         self._delivered.setdefault(user, deque(maxlen=500)).append(message_id)
+        for conn in self.registry.live(user):
+            conn.unacked.pop(message_id, None)
         self.outbox.sent(message_id)
+
+    async def _write_push(self, conn, item, frame=None):
+        _, text, origin, message_id = item
+        frame = frame if frame is not None else protocol.push(conn.protocol, text, origin, message_id)
+        if not await conn.send_json(frame):
+            return False
+        user = conn.identity.user
+        if conn.slot:  # an HTTP answer: delivered once the answer is written (http_api), queued again if not
+            conn.sent_items.append((item, frame))
+            self.outbox.track(user, item)  # stays in the file until then, so a restart cannot lose it
+        elif frame['type'] == 'push' and conn.capabilities.get('ack') is True:
+            if message_id not in self._delivered.get(user, ()):
+                conn.unacked[message_id] = item
+                self.outbox.track(user, item)
+        else:
+            self._mark_delivered(user, message_id)
+        if not conn.slot:  # an HTTP answer carries only the turn's own audio: no speech for its pushes
+            self._speak(conn, text, frame['id'] if frame['type'] == 'approval_request' else message_id)
+        return True
 
     async def _flush_later(self, conn, delay):
         await asyncio.sleep(delay)
@@ -434,10 +488,9 @@ class GlassesAdapter(BasePlatformAdapter):
             task.cancel()
         items, conn.held, sent = conn.held, [], 0
         try:
-            for _, text, origin, message_id in items:
-                if not await conn.send_json(protocol.push(conn.protocol, text, origin, message_id)):
+            for item in items:
+                if not await self._write_push(conn, item):
                     break
-                self._mark_delivered(user, message_id)
                 sent += 1
         finally:
             if sent < len(items):  # closed or cancelled: the rest waits for the next connection
@@ -460,25 +513,30 @@ class GlassesAdapter(BasePlatformAdapter):
                 if query_id not in self._resets:
                     await self._answered(conn, query_id)
 
-    async def _push(self, user, content, origin, message_id):
+    async def _push(self, user, content, origin, message_id, frame_builder=None):
         # The per-user lock keeps queued and live pushes in order. Devices whose protocol is not settled
         # yet hold the push until their flush; with no device reachable it waits in the outbox.
         async with self._lock(user):
             reached = False
             for conn in self.registry.live(user):
+                item = (time.time(), content, origin, message_id)
                 if not conn.flushed:
-                    item = (time.time(), content, origin, message_id)
                     conn.pending.append(item)
                     self.outbox.track(user, item)
                     reached = True
                 elif self._holds(conn, origin):
-                    self._hold(conn, (time.time(), content, origin, message_id))
+                    self._hold(conn, item)
                     if not self._waiting(conn):  # its question went stale: the older held pushes go first, now
                         await self._send_held(conn)
                     reached = True
-                elif await conn.send_json(protocol.push(conn.protocol, content, origin, message_id)):
-                    self._mark_delivered(user, message_id)
-                    reached = True
+                else:
+                    frame = frame_builder(conn) if frame_builder else None
+                    if await self._write_push(conn, item, frame):
+                        if frame and frame['type'] == 'approval_request':
+                            for approval in self._approvals.get(user, []):
+                                if approval.request_id == frame['id']:
+                                    approval.connections.add(conn)
+                        reached = True
             if not reached:
                 self.outbox.append(user, content, origin, message_id)
         return SendResult(success=True, message_id=message_id)
@@ -495,7 +553,8 @@ class GlassesAdapter(BasePlatformAdapter):
         turn = self._active_turn.get(user)
         final = metadata.get('notify') and not metadata.get('_interim_send')
         owner = metadata.get('reply_to_message_id')  # stream-consumer writes name the query they belong to
-        if final and reply_to in self._queries and not (turn and reply_to in turn.ids):
+        asker = self._queries.get(reply_to) if reply_to is not None else None
+        if final and asker is not None and asker.identity.user == user and not (turn and reply_to in turn.ids):
             # A command answered inline while a turn runs (/stop, /status): the reply to that query alone.
             if turn and reply_to in turn.arrivals:
                 turn.arrivals.remove(reply_to)
@@ -542,8 +601,48 @@ class GlassesAdapter(BasePlatformAdapter):
 
     async def _deliver_reply(self, user, conn, query_id, text):
         if not (conn in self.registry.live(user) and await conn.send_json(protocol.response(conn.protocol, text, query_id))):
-            await self._push(user, text, 'reply', uuid4().hex)  # the asker went offline: deliver out of band
+            message_id = uuid4().hex
+            self._silent[(user, message_id)] = self._silent.get((user, query_id), False)
+            await self._push(user, text, 'reply', message_id)  # the asker went offline: deliver out of band
+        elif not self._silent.get((user, query_id)):
+            self._speak(conn, text, query_id)
         await self._answered(conn, query_id)
+
+    def _speak(self, conn, text, ref):
+        mimes = audio.output_mimes(conn.capabilities) if conn.protocol == 1 else []
+        if mimes and not self._silent.get((conn.identity.user, ref)):
+            self._spawn(self._send_speech(conn, text, ref, mimes))
+
+    async def _send_speech(self, conn, text, ref, mimes):
+        # The text sender may hold this lock; synthesis must start after it has released it.
+        async with self._lock(conn.identity.user):
+            pass
+        for mime in mimes:  # the device's formats in its order: the next one if a conversion fails
+            key = (text, mime)
+            task = self._speech.get(key)
+            if task is None:
+                task = self._speech[key] = self._spawn(self._synthesise(text, mime))
+                while len(self._speech) > 16:
+                    self._speech.popitem(last=False)
+            data = await asyncio.shield(task)
+            if data:
+                await conn.send_json(protocol.audio(ref, base64.b64encode(data).decode(), mime))
+                return
+            if self._speech.get(key) is task:
+                self._speech.pop(key, None)  # a failure is not remembered: the next reply tries again
+
+    async def _synthesise(self, text, mime):
+        try:
+            from tools.tts_tool import text_to_speech_tool
+            async with self._speech_slots:  # at most two syntheses at once, e.g. when a full queue is flushed
+                result = json.loads(await asyncio.wait_for(asyncio.to_thread(text_to_speech_tool, text), 60))
+            paths = result.get('file_paths') or ([result['file_path']] if result.get('file_path') else [])
+            if result.get('success') is False or not paths:
+                raise ValueError('No TTS files')
+            return await audio.encode_files(paths, mime)
+        except Exception:
+            logger.debug('glasses: speech unavailable', exc_info=False)
+            return None
 
     async def _finish_query(self, user, turn):
         """Answer the query the chain is on, exactly once."""
@@ -594,15 +693,54 @@ class GlassesAdapter(BasePlatformAdapter):
         reason = reason[:1].upper() + reason[1:]
         allow = 'Say yes to allow it once, or no to block it.' if 'once' in prompt.choices else 'Say no to block it.'
         text = f'Hermes wants to run: {command}.' + (f' {reason}.' if reason else '') + f' {allow} (Typed: /approve or /deny.)'
-        result = await self._push(user, text, 'approval', uuid4().hex)
+        def build(conn):
+            if conn.protocol == 1 and conn.capabilities.get('buttons') is True:
+                return protocol.approval_request(request_id, text, prompt.command, prompt.description,
+                                                 list(prompt.choices))
+            return protocol.push(conn.protocol, text, 'approval', message_id)
+        message_id = uuid4().hex
+        result = await self._push(user, text, 'approval', message_id, build)
         approval.shown = True
         return result
+
+    async def _close_approval(self, user, approval, choice=None, except_conn=None):
+        for other in self.registry.live(user):
+            if other is not except_conn and other in approval.connections:
+                await other.send_json(protocol.approval_closed(approval.request_id, choice))
+
+    async def _button_approval(self, conn, frame):
+        from tools.approval import resolve_gateway_approval
+        user, request_id, choice = conn.identity.user, frame.get('id'), frame.get('choice')
+        approval = next((a for a in self._approvals.get(user, [])
+                         if isinstance(request_id, str) and a.request_id == request_id), None)
+        message = 'Unknown approval.'
+        ok = False
+        if approval:
+            if approval not in self._live_approvals(user):
+                message = 'Approval expired.'
+            elif not isinstance(choice, str) or choice not in approval.choices:
+                message = 'Invalid choice.'
+            elif resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
+                self._approvals[user].remove(approval)
+                if not self._approvals[user]:
+                    self._approvals.pop(user)
+                ok = True
+                message = "Okay, I won't run it." if choice == 'deny' else 'Okay, going ahead.'
+            else:
+                message = 'Approval expired.'
+        await conn.send_json(protocol.approval_result(request_id, ok, message, choice if ok else None))
+        if ok:
+            await self._close_approval(user, approval, choice, conn)
 
     def _live_approvals(self, user):
         """This user's approvals that Hermes still waits for (not timed out, not answered by a typed /approve)."""
         from tools.approval import list_gateway_approvals
-        live = [a for a in self._approvals.get(user, [])
+        previous = self._approvals.get(user, [])
+        live = [a for a in previous
                 if any(d.get('request_id') == a.request_id for d in list_gateway_approvals(a.session_key))]
+        for approval in previous:
+            if approval not in live and approval.connections:
+                self._spawn(self._close_approval(user, approval))
         if live:
             self._approvals[user] = live
         else:
@@ -626,7 +764,7 @@ class GlassesAdapter(BasePlatformAdapter):
         sessions = self._approval_sessions.get(user, set()) | {own_session}
         queued = {d.get('request_id') for key in sessions for d in list_gateway_approvals(key)}
         if not queued:
-            self._approvals.pop(user, None)
+            self._live_approvals(user)
             return False
         if clarify_gateway.has_pending(own_session):
             return False  # the agent asked a question: Hermes routes a yes or no to its clarify handler first
@@ -640,6 +778,7 @@ class GlassesAdapter(BasePlatformAdapter):
             said = 'This command can only be blocked. Say no to block it.'
         elif certain and resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
             self._approvals.pop(user, None)
+            await self._close_approval(user, approval, choice)  # the speaking device's card closes too
             said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
         else:
             self._live_approvals(user)
@@ -775,3 +914,27 @@ class GlassesAdapter(BasePlatformAdapter):
         except TimeoutError:
             future.cancel()
             return None
+
+    async def device_action(self, user, kind, payload):
+        if kind not in ('display', 'haptic'):
+            raise ValueError('Unknown device action')
+        async def deliver():
+            capability = 'display' if kind == 'display' else 'haptics'
+            targets = [c for c in self.registry.live(user)
+                       if c.protocol == 1 and c.capabilities.get(capability) is True]
+            turn = self._active_turn.get(user)
+            if turn and turn.conn in targets:
+                targets = [turn.conn]
+            frame = protocol.display(**payload) if kind == 'display' else protocol.haptic(**payload)
+            count = 0
+            for conn in targets:
+                count += bool(await conn.send_json(frame))
+            return count
+        if asyncio.get_running_loop() is self._loop:
+            return await deliver()
+        future = asyncio.run_coroutine_threadsafe(deliver(), self._loop)
+        try:
+            return await asyncio.wait_for(asyncio.wrap_future(future), 5)
+        except TimeoutError:
+            future.cancel()
+            return 0
