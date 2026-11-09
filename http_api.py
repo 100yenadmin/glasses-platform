@@ -170,6 +170,8 @@ class HttpApi:
     async def approval(self, request):
         conn = self._connection(request)
         body = await self._body(request)
+        capabilities = body.get('capabilities')
+        conn.capabilities = capabilities if isinstance(capabilities, dict) else {}
         try:
             await self.adapter.registry.add(conn)
             return await handle_approval(self.adapter, conn, body)
