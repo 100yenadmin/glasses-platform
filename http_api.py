@@ -107,7 +107,7 @@ def _requeue(adapter, conn, reply=None, turn_id=None, shown=None):
             items.append(item)
     adapter.outbox.forget(done)
     if reply:
-        items.append((time.time(), reply, 'reply', f'reply-{turn_id}'))
+        items.append((time.time(), reply, 'reply', f'reply-{user}-{turn_id}'))  # queue ids are global: per user
     adapter.outbox.merge(user, items)
 
 

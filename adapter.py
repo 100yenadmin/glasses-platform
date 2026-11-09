@@ -330,9 +330,9 @@ class GlassesAdapter(BasePlatformAdapter):
                 from tools.transcription_tools import transcribe_audio
                 data, ext = audio.decode(frame['audio'], self.broker.max_bytes)
                 path = await cache_audio_from_bytes_async(data, ext)
-                result = await asyncio.to_thread(transcribe_audio, path)
+                result = await asyncio.wait_for(asyncio.to_thread(transcribe_audio, path), 60)
                 text = result.get('transcript', '').strip() if result.get('success') else ''
-                text = text.lstrip('/').strip()  # speech never issues slash commands (the stop button is `interrupt`)
+                text = re.sub(r'^[\s/]+', '', text)  # speech never issues slash commands (the stop button is `interrupt`)
                 if not text:
                     raise ValueError('Empty transcript')
                 await conn.send_json(protocol.transcript(frame.get('id'), text))
@@ -445,7 +445,8 @@ class GlassesAdapter(BasePlatformAdapter):
                 self.outbox.track(user, item)
         else:
             self._mark_delivered(user, message_id)
-        self._speak(conn, text, frame['id'] if frame['type'] == 'approval_request' else message_id)
+        if not conn.slot:  # an HTTP answer carries only the turn's own audio: no speech for its pushes
+            self._speak(conn, text, frame['id'] if frame['type'] == 'approval_request' else message_id)
         return True
 
     async def _flush_later(self, conn, delay):

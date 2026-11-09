@@ -595,3 +595,13 @@ async def test_no_audio_wait_without_speech(server, monkeypatch, body):
     await client.post('/turn', headers=headers,
                       json={'text': 'Hello', **body, 'capabilities': {'audio_out': ['audio/mpeg']}})
     assert waits == [50]
+
+
+async def test_lost_replies_of_two_users_with_the_same_turn_id_are_both_kept(make_adapter):
+    from glasses_plugin.devices import Connection, Identity
+    adapter = make_adapter()
+    for user in ('alice', 'bob'):
+        conn = Connection(http_api.HttpSocket(), Identity(user, 'watch'), protocol=1, slot='watch#http-x')
+        http_api._requeue(adapter, conn, f'{user} reply', 'q1')
+    adapter.outbox.sent(adapter.outbox.drain('alice')[0][3])  # alice's recovered reply is delivered
+    assert [item[1] for item in adapter.outbox.drain('bob')] == ['bob reply']

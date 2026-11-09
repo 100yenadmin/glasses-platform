@@ -1,6 +1,6 @@
 # Device survey (November 2026)
 
-This is the research behind the M4 and M5 milestones in [ROADMAP.md](../ROADMAP.md). It records which devices
+This is the research behind milestones M4–M11 (one per device family) in [ROADMAP.md](../ROADMAP.md). It records which devices
 could connect to the plugin, how, and what is blocking them. Every row comes from the linked primary source as of
 2026-11-09. "Unverified" means we could not confirm it.
 
@@ -14,16 +14,16 @@ could connect to the plugin, how, and what is blocking them. Every row comes fro
   person's devices, and the offline queue.
 - Devices differ in two ways: what they can do (camera, display, speaker, mic, buttons, haptics) and how they
   connect. The plugin supports three ways of connecting: the WebSocket protocol (today), an HTTP route for devices
-  that cannot hold a WebSocket (planned), and compatible endpoints for existing device firmware (planned).
+  that cannot hold a WebSocket (today, 0.4.0), and compatible endpoints for existing device firmware (planned).
 
 ## Glasses
 
 | Device | How a client connects | What third-party code gets | Blocker | Plan |
 |---|---|---|---|---|
 | Ray-Ban Meta, Ray-Ban Display, Oakley ([toolkit](https://wearables.developer.meta.com/docs/develop/)) | A phone app using Meta's device toolkit | Camera, display (Display model); audio streaming is experimental | Developer preview; public publishing limited to partners | M2 via [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) |
-| Even Realities G2 ([Even Hub](https://github.com/even-realities/everything-evenhub)) | A web app inside the Even phone app; network via a URL allowlist | Glasses mic (PCM 16 kHz), display, touchpad, ring, IMU; no camera | Public listing needs Even review; beta testers do not | M5, first |
+| Even Realities G2 ([Even Hub](https://github.com/even-realities/everything-evenhub)) | A web app inside the Even phone app; network via a URL allowlist | Glasses mic (PCM 16 kHz), display, touchpad, ring, IMU; no camera | Public listing needs Even review; beta testers do not | M7 |
 | Even Realities G1 ([demo app](https://github.com/even-realities/EvenDemoApp)) | A phone app speaking raw Bluetooth | Mic (LC3), display, touch bar | No app platform | Through MentraOS |
-| Mentra Live, MentraOS ([MentraOS](https://github.com/Mentra-Community/MentraOS)) | Mentra phone app (miniapps) or the Mentra Live Bluetooth SDK | Transcripts, buttons, display; Mentra Live also camera, mic, speaker | Miniapps cannot be distributed yet | M5 |
+| Mentra Live, MentraOS ([MentraOS](https://github.com/Mentra-Community/MentraOS)) | Mentra phone app (miniapps) or the Mentra Live Bluetooth SDK | Transcripts, buttons, display; Mentra Live also camera, mic, speaker | Miniapps cannot be distributed yet | M11 |
 | Brilliant Labs Halo ([SDK](https://github.com/brilliantlabsAR/brilliant_sdk)) | Lua on the glasses, Bluetooth to a phone or PC host | Display, audio, IMU, camera | Shipping status unverified | Watch list |
 | Android XR glasses ([Jetpack Projected](https://developer.android.com/develop/xr/jetpack-xr-sdk/access-hardware-projected-context)) | A normal phone app with a projected context | Mic, camera, display | Alpha; consumer devices unverified | Watch list |
 | Snap Specs ([WebSocket API](https://developers.snap.com/spectacles/about-spectacles-features/apis/web-socket)) | A Lens on the glasses opens `wss://` directly | Mic, camera, display (publishing rules unverified) | Consumer availability unverified | Watch list |
@@ -32,18 +32,18 @@ could connect to the plugin, how, and what is blocking them. Every row comes fro
 
 | Device | How a client connects | Blocker | Plan |
 |---|---|---|---|
-| Apple Watch ([TN3135](https://developer.apple.com/documentation/technotes/tn3135-low-level-networking-on-watchos)) | Plain HTTP only; WebSockets are allowed only during audio streaming or calls. Pushes through Apple's notification service | No streamed replies; Shortcuts on the watch need a real-device test | M4 HTTP route, then M5 Shortcut and app |
-| Wear OS ([network access](https://developer.android.com/training/wearables/data/network-access)) | Normal Android networking; WebSocket works | Battery: connect while in use | M5 Android client |
-| Pebble ([PebbleOS](https://github.com/coredevices/PebbleOS), [Bobby](https://github.com/pebble-dev/bobby-assistant)) | Phone-side JavaScript with WebSocket support | Needs the phone app running | M5: point Bobby at our protocol |
+| Apple Watch ([TN3135](https://developer.apple.com/documentation/technotes/tn3135-low-level-networking-on-watchos)) | HTTP(S) through `URLSession`; WebSockets are allowed only during audio streaming or calls. Pushes through Apple's notification service | No streamed replies; Shortcuts on the watch need a real-device test | M4 HTTP route (0.4.0), then M5 Shortcut and app |
+| Wear OS ([network access](https://developer.android.com/training/wearables/data/network-access)) | Normal Android networking; WebSocket works | Battery: connect while in use | M9 Android client |
+| Pebble ([PebbleOS](https://github.com/coredevices/PebbleOS), [Bobby](https://github.com/pebble-dev/bobby-assistant)) | Phone-side JavaScript with WebSocket support | Needs the phone app running | M10: point Bobby at our protocol |
 | Garmin ([Connect IQ](https://developer.garmin.com/connect-iq/api-docs/Toybox/Communications.html)) | HTTP requests only, small responses | Microphone access is new (SDK 9.3) | Watch list |
 
 ## Speakers, voice boxes and pendants
 
 | Device | How a client connects | Plan |
 |---|---|---|
-| ESP32 voice boxes running [xiaozhi](https://github.com/78/xiaozhi-esp32) (138+ boards) | WebSocket with a bearer token, a JSON hello, Opus audio frames, MCP messages ([protocol](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md)) | M5: a compatible endpoint, after M1 voice in and out |
+| ESP32 voice boxes running [xiaozhi](https://github.com/78/xiaozhi-esp32) (138+ boards) | WebSocket with a bearer token, a JSON hello, Opus audio frames, MCP messages ([protocol](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md)) | M6: a compatible endpoint |
 | Home Assistant Voice PE, ESPHome satellites, hacked Echos, Nest board swaps | Home Assistant talks to the device; an agent plugs in as a conversation agent | Covered by hermes-voice / the Hermes API server |
-| [Omi](https://docs.omi.me/doc/developer/apps/Integrations) pendant | Webhooks from Omi's backend: live transcript or raw audio | M5: webhook relay |
+| [Omi](https://docs.omi.me/doc/developer/apps/Integrations) pendant | Webhooks from Omi's backend: live transcript or raw audio | M8: webhook relay |
 
 ## Not planned
 
