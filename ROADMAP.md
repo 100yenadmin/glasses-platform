@@ -32,7 +32,7 @@ Hermes gateway with real models only; no real glasses or phone app yet (that is 
   (allow once) or "no" answers it. Native `approval_request` / `approval_response` frames stay planned for clients
   with buttons.
 - [x] `interrupt` → `/stop` (0.2.1)
-- [ ] Durable outbox with `ack`
+- [x] Durable outbox: queued pushes survive a gateway restart (0.3.0); `ack` from v1 devices still planned
 - [x] `hermes glasses pair <user> <device>`: mint a device token and print a QR / connect URL (0.2.0), plus
   `devices`, `revoke` and `try` (talk to your agent from the terminal as a pair of glasses with a camera)
 - [ ] CI matrix (pinned Hermes release + main), community kit, product-page README

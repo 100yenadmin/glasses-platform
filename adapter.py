@@ -69,6 +69,12 @@ class Approval:
     shown: bool = False  # its question has gone out to the devices (or the outbox)
 
 
+def _outbox_path():
+    """The profile's own file for pushes waiting for an offline device."""
+    from hermes_constants import get_hermes_home
+    return get_hermes_home() / 'glasses' / 'outbox.json'
+
+
 def _as_media(metadata):
     return {**(metadata or {}), 'glasses_media': True}
 
@@ -132,7 +138,9 @@ class GlassesAdapter(BasePlatformAdapter):
         self._hold_seconds = float(setting('push_hold_seconds', 120))
         self._max_frame_mb = float(setting('max_frame_mb', 8))
         self.registry = Registry()
-        self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)))
+        keep = str(setting('outbox_persist', 'true')).strip().lower() not in ('0', 'false', 'no', 'off')
+        self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)),
+                             path=_outbox_path() if keep else None)
         self.broker = PhotoBroker(self._max_frame_mb)
         self._tokens, self._active_turn, self._user_locks = {}, {}, {}
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
@@ -266,7 +274,9 @@ class GlassesAdapter(BasePlatformAdapter):
         # Never settled or still held: keep its pushes for the next connection, unless another device already
         # received them.
         delivered = self._delivered.get(conn.identity.user, ())
-        self.outbox.merge(conn.identity.user, [item for item in [*conn.pending, *conn.held] if item[3] not in delivered])
+        left = [*conn.pending, *conn.held]
+        self.outbox.merge(conn.identity.user, [item for item in left if item[3] not in delivered])
+        self.outbox.forget([item[3] for item in left if item[3] in delivered])
         conn.pending, conn.held = [], []
 
     async def _new_session(self, conn, query_id=None):
@@ -377,10 +387,13 @@ class GlassesAdapter(BasePlatformAdapter):
             finally:
                 if sent < len(items):  # closed or cancelled: keep the rest queued, retry on the next frame
                     conn.flushed = False
-                    self.outbox.merge(user, items[sent:])
+                    delivered = self._delivered.get(user, ())  # another device already got these
+                    self.outbox.merge(user, [item for item in items[sent:] if item[3] not in delivered])
+                    self.outbox.forget([item[3] for item in items[sent:] if item[3] in delivered])
 
     def _mark_delivered(self, user, message_id):
         self._delivered.setdefault(user, deque(maxlen=500)).append(message_id)
+        self.outbox.sent(message_id)
 
     async def _flush_later(self, conn, delay):
         await asyncio.sleep(delay)
@@ -401,6 +414,7 @@ class GlassesAdapter(BasePlatformAdapter):
 
     def _hold(self, conn, item):
         conn.held.append(item)
+        self.outbox.track(conn.identity.user, item)
         if conn.held_task is None:
             conn.held_task = self._spawn(self._release_held_later(conn))
 
@@ -429,6 +443,7 @@ class GlassesAdapter(BasePlatformAdapter):
             if sent < len(items):  # closed or cancelled: the rest waits for the next connection
                 delivered = self._delivered.get(user, ())
                 self.outbox.merge(user, [item for item in items[sent:] if item[3] not in delivered])
+                self.outbox.forget([item[3] for item in items[sent:] if item[3] in delivered])
 
     async def _answered(self, conn, query_id):
         """The device got its answer (or its error): pushes held behind it follow now."""
@@ -452,7 +467,9 @@ class GlassesAdapter(BasePlatformAdapter):
             reached = False
             for conn in self.registry.live(user):
                 if not conn.flushed:
-                    conn.pending.append((time.time(), content, origin, message_id))
+                    item = (time.time(), content, origin, message_id)
+                    conn.pending.append(item)
+                    self.outbox.track(user, item)
                     reached = True
                 elif self._holds(conn, origin):
                     self._hold(conn, (time.time(), content, origin, message_id))

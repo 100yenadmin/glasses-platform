@@ -1,7 +1,7 @@
 name: glasses-platform
 kind: platform
 label: Smart glasses
-version: "0.2.1"
+version: "0.3.0"
 author: 100yenadmin
 requires_hermes: ">=0.22.2"
 description: >
@@ -9,7 +9,8 @@ description: >
   by voice. Pair a device with one command (`hermes glasses pair`) or try it from the terminal (`hermes glasses try`).
   A hardware-independent WebSocket channel with legacy and v1 clients.
   Disclosure — listens on a network port; device tokens grant full agent access; `hermes glasses pair` writes
-  device tokens to the profile .env; photos are cached in the Hermes image cache.
+  device tokens to the profile .env; pushes waiting for an offline device are kept in
+  $HERMES_HOME/glasses/outbox.json (owner-only); photos are cached in the Hermes image cache.
 optional_env:
   - name: GLASSES_DEVICES
     description: "Device credentials: user:device=token, separated by commas"
@@ -34,6 +35,10 @@ optional_env:
   - name: GLASSES_AUTO_CAPTURE
     description: "Keyword capture: keywords or off"
     prompt: "Automatic photo capture"
+    password: false
+  - name: GLASSES_OUTBOX_PERSIST
+    description: "Keep pushes for offline devices across gateway restarts (default on)"
+    prompt: "Persist the offline queue"
     password: false
   - name: GLASSES_PUSH_HOLD_SECONDS
     description: "Longest a push waits for a v0 device's pending answer (default 120)"

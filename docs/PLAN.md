@@ -116,7 +116,8 @@ Details are in [PROTOCOL.md](PROTOCOL.md).
 - If a turn is active for the user, `send()` emits `response`.
 - Otherwise it emits `push` (v1) or `response` (v0).
 - If no device is connected, the message goes to a bounded in-memory outbox: 50 items, 24 h, flushed on reconnect.
-- The outbox is lost on gateway restart in M0. M1 makes it durable, with acks.
+- Since 0.3.0 the outbox is also kept in `$HERMES_HOME/glasses/outbox.json` (mode 600, replaced atomically on every
+  change), so it survives a gateway restart. Acks from v1 devices are still planned.
 
 **D8. Short spoken answers.** The platform hint tells the model that replies are spoken or shown on a tiny lens:
 1–3 short sentences, no markdown, no tables, no raw URLs unless asked.
@@ -141,6 +142,7 @@ scoped-secret helpers, never `os.getenv`.
 | v0 push hold | `GLASSES_PUSH_HOLD_SECONDS` | `120` | Longest a push waits for a v0 device's pending answer |
 | max frame | `GLASSES_MAX_FRAME_MB` | `8` | Largest WebSocket frame |
 | outbox | `GLASSES_OUTBOX_MAX` / `GLASSES_OUTBOX_TTL_HOURS` | `50` / `24` | Offline queue |
+| outbox file | `GLASSES_OUTBOX_PERSIST` | `on` | Keep the offline queue in `$HERMES_HOME/glasses/outbox.json` across restarts |
 
 ## 7. Streaming, TTS and approvals
 
