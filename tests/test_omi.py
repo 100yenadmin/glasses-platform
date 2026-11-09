@@ -244,6 +244,50 @@ async def test_short_reply_is_long_enough_for_omi_notification(server):
     assert await post(client, segment('Hermes, two plus two')) == {'message': 'Hermes: 4.'}
 
 
+async def test_idle_session_expires_on_next_call_and_active_session_survives(server, monkeypatch):
+    from glasses_plugin import omi
+    adapter, client = server
+    now = [10.0]
+    monkeypatch.setattr(omi, 'monotonic', lambda: now[0])
+    reply_with(adapter)
+    question = segment('Hermes, hello')
+    await post(client, question)
+    now[0] += 599
+    await post(client, url=URL.replace('live', 'active'))
+    now[0] += 2
+    await post(client, url=URL.replace('live', 'active'))
+    assert [key[1] for key in api_for(adapter).sessions] == ['active']
+    assert await post(client, question) == {'message': 'Hermes: Hello back.'}
+
+
+async def test_seen_keys_drop_oldest_beyond_256(server):
+    adapter, client = server
+    reply_with(adapter)
+    question = segment('Hermes, hello')
+    await post(client, question)
+    await post(client, *(segment('background', i) for i in range(1, 257)))
+    state = next(iter(api_for(adapter).sessions.values()))
+    assert len(state['seen']) == 256
+    await post(client, segment('background', 1))  # duplicate must not refresh oldest key
+    await post(client, question)
+    assert adapter.handle_message.await_count == 2
+    assert (1, 'background') not in state['seen']
+
+
+async def test_sessions_are_capped_per_identity_and_evict_least_recently_used(server):
+    adapter, client = server
+    adapter._tokens = parse_devices('alice:ray=tok-alice-1,bob:omi=tok-bob-1', '')
+    await post(client, url=URL.replace('tok-alice-1', 'tok-bob-1'))
+    for i in range(32):
+        await post(client, url=URL.replace('live', str(i)))
+    await post(client, url=URL.replace('live', '0'))
+    await post(client, url=URL.replace('live', '32'))
+    keys = list(api_for(adapter).sessions)
+    alice = [session for identity, session in keys if identity.user == 'alice']
+    assert len(alice) == 32 and '0' in alice and '32' in alice and '1' not in alice
+    assert any(identity.user == 'bob' for identity, _ in keys)
+
+
 @pytest.mark.parametrize('raw', ['{}', 'null', '1', '"text"', '[1]', '[{"text": 2}]', '{'])
 async def test_malformed_body_is_rejected_without_consuming_pushes(server, raw):
     adapter, client = server

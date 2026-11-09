@@ -13,6 +13,9 @@ WAKE = re.compile(r'^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes\b[\W_]*', 
 FOLLOWUP_SECONDS = 8
 MESSAGE_LIMIT = 1000
 MESSAGE_PREFIX = 'Hermes: '
+SESSION_SECONDS = 600
+MAX_SEEN = 256
+MAX_SESSIONS = 32
 
 
 class OmiApi:
@@ -22,8 +25,17 @@ class OmiApi:
         self.sessions = {}  # (authenticated identity, session_id) -> seen segments and wake deadline
 
     def _questions(self, identity, session_id, segments):
-        state = self.sessions.setdefault((identity, session_id), {'seen': set(), 'until': 0})
         now = monotonic()
+        for key, state in list(self.sessions.items()):
+            if now - state['last_call'] >= SESSION_SECONDS:
+                del self.sessions[key]
+        key = (identity, session_id)
+        state = self.sessions.pop(key, {'seen': {}, 'until': 0})
+        state['last_call'] = now
+        self.sessions[key] = state  # insertion order is session access order
+        sessions = [key for key in self.sessions if key[0] == identity]
+        if len(sessions) > MAX_SESSIONS:
+            del self.sessions[sessions[0]]
         if state['until'] < now:
             state['until'] = 0
         user_only = any(segment.get('is_user') is True for segment in segments)
@@ -33,7 +45,9 @@ class OmiApi:
             key = (segment.get('start'), text)
             if key in state['seen']:
                 continue
-            state['seen'].add(key)
+            state['seen'][key] = None
+            if len(state['seen']) > MAX_SEEN:
+                del state['seen'][next(iter(state['seen']))]
             if user_only and segment.get('is_user') is not True:
                 continue
             wake = WAKE.match(text)
