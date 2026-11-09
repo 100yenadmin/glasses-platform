@@ -613,6 +613,26 @@ async def test_simulator_waits_past_a_queued_reminder_for_its_own_answer(server,
 
 
 @pytest.mark.asyncio
+async def test_simulator_ends_on_a_spoken_error_without_an_stt_frame(server, monkeypatch, tmp_path):
+    """Failed transcription: the adapter speaks an error and sends no `stt`; the run still ends on its `tts stop`."""
+    adapter, client = server
+    spec = importlib.util.spec_from_file_location('xiaozhi_error_sim', Path(__file__).resolve().parents[1] / 'sim/xiaozhi_sim.py')
+    sim = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sim)
+    monkeypatch.setattr(xz, 'AUDIO_TIMEOUT', 0.01)
+    async def fake_query(conn, frame):
+        await conn.send_json({'type': 'error', 'turn': frame['id'], 'message': "I couldn't hear that."})
+    monkeypatch.setattr(adapter, '_process_query', fake_query)
+    monkeypatch.setattr(sim, 'wav_packets', AsyncMock(return_value=[SPEECH, QUIET]))
+    frames = []
+    started = asyncio.get_running_loop().time()
+    assert await sim.run(ota=str(client.make_url('/xiaozhi/ota/tok-alice-1')), out=tmp_path / 'reply.ogg',
+                         timeout=3, emit=lambda s: frames.append(json.loads(s))) == 0
+    assert asyncio.get_running_loop().time() - started < 2
+    assert "couldn't hear" in ' '.join(str(f.get('text')) for f in frames)
+
+
+@pytest.mark.asyncio
 async def test_simulator_text_only_receives_reminder_without_upload(server, monkeypatch, tmp_path):
     adapter, client = server
     spec = importlib.util.spec_from_file_location('xiaozhi_text_sim', Path(__file__).resolve().parents[1] / 'sim/xiaozhi_sim.py')
