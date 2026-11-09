@@ -1,14 +1,15 @@
 name: glasses-platform
 kind: platform
 label: Smart glasses
-version: "0.1.3"
+version: "0.2.0"
 author: 100yenadmin
 requires_hermes: ">=0.22.2"
 description: >
-  Talk to your Hermes agent through smart glasses, share camera photos, and receive reminders.
+  Talk to your Hermes agent through smart glasses, share camera photos, receive reminders, and approve commands
+  by voice. Pair a device with one command (`hermes glasses pair`) or try it from the terminal (`hermes glasses try`).
   A hardware-independent WebSocket channel with legacy and v1 clients.
-  Disclosure — listens on a network port; device tokens grant full agent access;
-  photos are cached in the Hermes image cache.
+  Disclosure — listens on a network port; device tokens grant full agent access; `hermes glasses pair` writes
+  device tokens to the profile .env; photos are cached in the Hermes image cache.
 optional_env:
   - name: GLASSES_DEVICES
     description: "Device credentials: user:device=token, separated by commas"

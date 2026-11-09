@@ -28,10 +28,13 @@ Hermes gateway with real models only; no real glasses or phone app yet (that is 
 ## M1 — Complete channel
 
 - [ ] Server-side TTS (PCM16 24 kHz) through Hermes TTS providers; auto-TTS for voice turns
-- [ ] Native approval frames (`approval_request` / `approval_response`)
+- [x] Approvals by voice (0.2.0): a dangerous-command approval is asked as a yes/no question, and a spoken "yes"
+  (allow once) or "no" answers it. Native `approval_request` / `approval_response` frames stay planned for clients
+  with buttons.
 - [ ] `interrupt` → `/stop`
 - [ ] Durable outbox with `ack`
-- [ ] `hermes glasses pair <user> <device>`: mint a device token and print a QR / connect URL
+- [x] `hermes glasses pair <user> <device>`: mint a device token and print a QR / connect URL (0.2.0), plus
+  `devices`, `revoke` and `try` (talk to your agent from the terminal as a pair of glasses with a camera)
 - [ ] CI matrix (pinned Hermes release + main), community kit, product-page README
 
 **Exit criteria:** every M1 frame is covered by tests, and the live proof covers TTS and approvals.

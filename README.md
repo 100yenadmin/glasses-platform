@@ -5,7 +5,7 @@
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.1.3 preview (milestone M0).** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.2.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
@@ -45,8 +45,23 @@ hermes plugins install https://github.com/100yenadmin/glasses-platform --enable
 
 ## Configure
 
-Give each device its own token. Tokens map to `user:device`, and all devices of one user use the same conversation.
-Put this in `~/.hermes/.env`:
+Pair each device with one command. It creates a random token, saves it in the profile's `.env`, and prints the
+connect URL and a QR code to open in the glasses app:
+
+```bash
+hermes glasses pair me rayban      # user "me", device "rayban"
+hermes glasses pair me phone       # a second device: same user, same conversation
+hermes glasses devices             # list paired devices (tokens are never shown)
+hermes glasses revoke me phone     # remove one
+hermes gateway restart             # the gateway loads devices when it starts
+```
+
+The URL points at this machine on your local network. Pass `--host` for another address (for example a Tailscale
+name) and `--wss` behind a TLS proxy.
+
+<details><summary>Setting tokens by hand</summary>
+
+Tokens map to `user:device`, and all devices of one user share the same conversation. Put this in `~/.hermes/.env`:
 
 ```bash
 GLASSES_DEVICES=me:rayban=<long-random-token>,me:g2=<another-token>
@@ -63,6 +78,8 @@ streaming:
   enabled: true      # optional: stream replies to v1 clients as they are written
 ```
 
+</details>
+
 Photo turns need a model that can see: either a main model that accepts images, or an `auxiliary.vision` model in
 `config.yaml`.
 
@@ -77,14 +94,19 @@ To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. 
 generated device token and only the vision, glasses, cronjob and memory toolsets (it uses the z.ai GLM coding plan;
 see the script's header).
 
-**With the simulator:**
+**From your terminal, in two minutes** (no glasses needed). `hermes glasses try` connects to your running gateway
+as a pair of glasses with a camera. Type what you would say; reminders and other pushes print when they arrive:
 
 ```bash
-GLASSES_SIM_TOKEN=<token> python sim/glasses_sim.py --url ws://127.0.0.1:8765/voice --say "What can you do?"
+hermes glasses pair            # device "glasses" for user "owner"
+hermes gateway restart
+hermes glasses try             # then: "What am I looking at?", "Remind me in one minute to stretch."
 ```
 
-To test a photo turn, add `--photo photo.jpg`. The plugin asks the "glasses" for a photo when you say something like
-"what am I looking at?". The agent can also take one itself with the `glasses_capture_photo` tool.
+The camera "sees" a sample airport photo; pass `--photo my.jpg` for your own. The plugin asks the glasses for a photo
+when you say something like "what am I looking at?", and the agent can take one itself with its
+`glasses_capture_photo` tool. For scripted runs, `sim/glasses_sim.py --url "<connect URL>" --say "..." --pretty`
+does the same without a prompt.
 
 **With the hermes-glasses iOS app** (untested so far): in the app, set Settings → Assistant → Backend to Bridge,
 and point it at `ws://<your-mac>.local:8765/voice?token=<token>`.
@@ -101,7 +123,12 @@ short offline queue until a device reconnects.
   the approval prompts and clarify questions the agent sends to your devices. Keep tokens long, random and private.
 - **Photos.** Photos from the glasses are saved in Hermes's own image cache, like photos sent from any other channel.
 - **New session.** The device's new-session button answers Hermes's `/new` confirmation for that user's own session.
-  The plugin never answers command approvals; the wearer does.
+- **Approvals by voice.** When the agent wants to run a dangerous command, the glasses ask a short question ("Hermes
+  wants to run: … Say yes to allow it once, or no to block it."). Only a whole "yes" (allow once, never for the
+  session or always) or "no" from one of that user's own devices answers it; anything else goes to the agent as usual.
+  Typed `/approve` and `/deny` still work. The plugin never answers an approval by itself.
+- **`hermes glasses pair`** writes the new device's token to `GLASSES_DEVICES` in the profile's `.env` (keeping the
+  devices already set there or in `config.yaml`), and prints the connect URL. `revoke` removes one.
 - **No third-party calls.** The plugin makes no outbound network requests, runs no shell commands, sends no telemetry
   and starts no background processes beyond its listener.
 - **Tokens** are read through Hermes's per-profile settings reader, from `~/.hermes/.env` or `config.yaml`.

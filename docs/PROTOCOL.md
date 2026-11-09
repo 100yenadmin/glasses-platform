@@ -84,7 +84,7 @@ to a device that declared `camera:false`.
 | `status` | `state` (`thinking`/`working`/`idle`), `detail?` | Activity for the HUD. `detail` is the latest tool-progress or commentary line (≤200 chars); never speak it. A turn ends with `response`, or with `idle` if the agent produced no text. |
 | `response_delta` | `turn`, `text` | **Cumulative** reply text so far (only when Hermes streaming is on). Render by replacing: it restarts when the agent begins a new segment after a tool call. |
 | `response` | `turn`, `text`, `final:true`, `tts` | The authoritative reply: exactly one per `query`, sent when Hermes finishes the turn |
-| `push` | `id`, `origin`, `text` | Out-of-turn message, fanned out to all of the user's live devices. `origin`: `message`, `cron`, `approval` (a text approval prompt), `clarify` (a question from the agent), `reply` (the reply to a query whose device went offline). Others may be added. |
+| `push` | `id`, `origin`, `text` | Out-of-turn message, fanned out to all of the user's live devices. `origin`: `message`, `cron`, `approval` (a command approval, asked as a yes/no question), `clarify` (a question from the agent), `reply` (the reply to a query whose device went offline). Others may be added. |
 | `capture_photo` | `request`, `reason` (`keyword`/`tool`) | Photo request |
 | `approval_request` | `id`, `text`, `choices` | **M1** |
 
@@ -95,7 +95,10 @@ to a device that declared `camera:false`.
 - A reply goes only to the device that sent the `query`, and so do that turn's `response_delta` and `status`
   frames. If that device went offline, the reply goes out as a `push` with origin `reply`.
 - Pushes, approval prompts and clarify questions go to every live device of the same user (v0 gets them as
-  `response`) and never to another user. Answer a prompt with an ordinary `query`, for example `/approve`.
+  `response`) and never to another user. Answer a prompt with an ordinary `query`. For a command approval a `query`
+  whose whole text is a yes ("yes", "go ahead", "allow it", ...) allows the command once and a no ("no", "stop",
+  "cancel", ...) blocks it; the device gets a short `response` ("Okay, going ahead.") to that query. Typed `/approve`
+  and `/deny` also work.
 - v0 has no `push` frame, so a push sent while a v0 device waits for its answer would look like that answer. While
   a v0 device has a `query` or `new_session` in flight, pushes to it wait until its answer (`response`, `error` or
   `session_reset`) has gone out, then follow in order. They wait 120 s at most (`GLASSES_PUSH_HOLD_SECONDS`).

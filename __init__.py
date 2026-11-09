@@ -5,7 +5,7 @@ import importlib.util
 from gateway.platform_registry import PlatformEntry
 from gateway.platforms._shared import extra_or_secret
 from .adapter import GlassesAdapter
-from . import tools
+from . import cli, tools
 
 
 def configured(config=None):
@@ -33,3 +33,4 @@ def register(ctx):
     ctx.register_tool(name='glasses_capture_photo', toolset='glasses', schema=tools.SCHEMA,
                       handler=tools.capture_photo, is_async=True, check_fn=tools.available,
                       description=tools.DESCRIPTION, emoji='👓')
+    cli.register(ctx)
