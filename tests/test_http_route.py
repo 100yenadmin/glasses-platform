@@ -55,7 +55,8 @@ async def test_text_turn_auth_and_existing_reply_path(server, headers, query):
     response = await client.post('/turn' + query, headers=headers, json={'text': 'Hello', 'id': 't1'})
     assert response.status == 200
     assert await response.json() == {'id': 't1', 'status': 'done', 'text': 'Hello back.', 'pushes': []}
-    assert adapter.handle_message.call_args.args[0].message_id == 't1'
+    from glasses_plugin.adapter import _wire_id
+    assert _wire_id(adapter.handle_message.call_args.args[0].message_id) == 't1'
     assert adapter.registry.live('alice') == []
 
 

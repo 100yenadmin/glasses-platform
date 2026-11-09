@@ -87,6 +87,21 @@ def _as_media(metadata):
 
 # Hermes wraps cron deliveries in a header (job name and id) and a footer (how to stop the job). Read aloud on
 # glasses that is noise: the wearer hears the job's own words, and the push frame says it came from cron.
+_HERMES_ID = re.compile(r'(.+)~g[0-9a-f]{8}', re.DOTALL)
+
+
+def _hermes_id(wire):
+    """Hermes keeps every message id per session forever and refuses an old id with new text, so a device that
+    restarts its id counter (q1, q2, ...) would wait forever. Hermes gets a fresh id; devices keep their own."""
+    return f'{wire}~g{uuid4().hex[:8]}'
+
+
+def _wire_id(value):
+    """The device's own query id for an id this adapter gave Hermes; any other value unchanged."""
+    match = _HERMES_ID.fullmatch(value) if isinstance(value, str) else None
+    return match.group(1) if match else value
+
+
 _CRON_WRAPPER = re.compile(
     r'\ACronjob Response: (?P<name>[^\n]*)\n\(job_id: [^)\n]*\)\n-+\n\n(?:(?P<body>.*)\n\n)?'
     r'To stop or manage this job, send me a new message [^\n]*\Z', re.S)
@@ -388,7 +403,7 @@ class GlassesAdapter(BasePlatformAdapter):
         event = MessageEvent(
             text=text, message_type=MessageType.PHOTO if path else MessageType.TEXT,
             source=self.build_source(chat_id=user, chat_name=user, chat_type='dm', user_id=user, user_name=user),
-            user_id=user, user_name=user, message_id=turn_id,
+            user_id=user, user_name=user, message_id=_hermes_id(turn_id),
             media_urls=[path] if path else [], media_types=['image/jpeg'] if path else [], raw_message=raw)
         event._glasses_connection = conn  # retained through Hermes startup replay
         event._glasses_reset = reset
@@ -547,6 +562,7 @@ class GlassesAdapter(BasePlatformAdapter):
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
         user, metadata = str(chat_id), metadata or {}
+        reply_to = _wire_id(reply_to)
         message_id = uuid4().hex
         # Human-decision prompts (text approvals, clarify questions) must reach every device in full.
         if metadata.get('is_approval_prompt') or metadata.get('glasses_prompt'):
@@ -556,7 +572,7 @@ class GlassesAdapter(BasePlatformAdapter):
             content = _unwrap_cron(content)
         turn = self._active_turn.get(user)
         final = metadata.get('notify') and not metadata.get('_interim_send')
-        owner = metadata.get('reply_to_message_id')  # stream-consumer writes name the query they belong to
+        owner = _wire_id(metadata.get('reply_to_message_id'))  # stream-consumer writes name the query they belong to
         asker = self._queries.get(reply_to) if reply_to is not None else None
         if final and asker is not None and asker.identity.user == user and not (turn and reply_to in turn.ids):
             # A command answered inline while a turn runs (/stop, /status): the reply to that query alone.
@@ -853,29 +869,29 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._status(chat_id, 'idle')
 
     async def on_processing_start(self, event):
-        user = event.source.chat_id
-        conn = getattr(event, '_glasses_connection', None) or self._queries.get(event.message_id)
+        user, query = event.source.chat_id, _wire_id(event.message_id)
+        conn = getattr(event, '_glasses_connection', None) or self._queries.get(query)
         reset = getattr(event, '_glasses_reset', False)
         turn = self._active_turn.get(user)
         if conn and (turn is None or not turn.started):
-            self._active_turn[user] = Turn(conn, event.message_id, reset=reset, started=True)
-        elif conn and event.message_id != turn.id:
+            self._active_turn[user] = Turn(conn, query, reset=reset, started=True)
+        elif conn and query != turn.id:
             # A queued follow-up runs inside the opener's processing: the previous query is answered first.
             await self._finish_query(user, turn)
             turn.conn, turn.id, turn.reset, turn.ran, turn.text, turn.stream, turn.commentary, turn.notes = (
-                conn, event.message_id, reset, False, '', None, '', [])
+                conn, query, reset, False, '', None, '', [])
             turn.failed = False
-            turn.ids.add(event.message_id)
-            if event.message_id in turn.arrivals:
-                turn.arrivals.remove(event.message_id)
+            turn.ids.add(query)
+            if query in turn.arrivals:
+                turn.arrivals.remove(query)
         await self._status(user, 'thinking')
 
     async def on_processing_complete(self, event, outcome):
-        user = event.source.chat_id
+        user, query = event.source.chat_id, _wire_id(event.message_id)
         turn = self._active_turn.get(user)
         # Follow-ups complete inside the opener's processing, before their reply is sent; only the opener's
         # completion (after Hermes' final send) ends the chain.
-        if turn and turn.started and event.message_id == turn.opener:
+        if turn and turn.started and query == turn.opener:
             turn.failed = outcome is not ProcessingOutcome.SUCCESS
             # A mid-chain query that never started and is not queued was folded into this run by Hermes'
             # interrupt: the reply answers the latest such query, on its own device.
@@ -891,7 +907,7 @@ class GlassesAdapter(BasePlatformAdapter):
                 await self._settle(user, {*turn.ids, turn.id, *folded})
 
     def _queued(self, query_id):
-        return any(getattr(event, 'message_id', None) == query_id for event in self._pending_messages.values())
+        return any(_wire_id(getattr(event, 'message_id', None)) == query_id for event in self._pending_messages.values())
 
     async def get_chat_info(self, chat_id):
         return {'name': chat_id, 'type': 'dm'}

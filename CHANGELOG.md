@@ -17,6 +17,9 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 - **Even Realities G2 glasses.** An Even Hub app in `clients/even-g2`: tap the touchpad to talk, read the answer
   on the lens as it streams, see reminders, and answer approvals from a Yes/No list. You pack it with your own
   gateway address. See [the G2 client](clients/even-g2/README.md).
+- **Reused query ids are answered.** Hermes refuses an old message id that arrives with new text, so a device that
+  restarted its id counter (`q1`, `q2`, …) used to wait forever. Each query now reaches Hermes under a fresh id;
+  devices still see their own ids on every reply.
 
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
