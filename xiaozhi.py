@@ -215,7 +215,8 @@ class Recording:
         self.packets.append(packet)
         # Speech by size per frame time: more than 0.5 byte per ms (4 kb/s), and more than a 12-byte quiet frame.
         self.speech |= len(packet) > max(12, self.frame_ms / 2)
-        self.quiet = self.quiet + self.frame_ms if len(packet) <= 12 and self.speech else 0
+        # Quiet by size per frame time too: at most 12 bytes, or an eighth of a byte per ms for long frames.
+        self.quiet = self.quiet + self.frame_ms if len(packet) <= max(12, self.frame_ms / 8) and self.speech else 0
         return (self.mode in ('auto', 'realtime') and self.quiet >= 800
                 or self.size >= self.max_bytes or len(self.packets) * self.frame_ms >= 15000)
 

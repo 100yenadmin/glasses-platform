@@ -686,3 +686,10 @@ def test_speech_detection_follows_the_frame_duration(frame_ms, size, speech):
     recording = Recording({'sample_rate': 16000, 'channels': 1, 'frame_duration': frame_ms})
     recording.add(b'x' * size)
     assert recording.speech is speech
+
+
+def test_long_frames_of_silence_end_an_auto_recording():
+    from glasses_plugin.xiaozhi import Recording
+    recording = Recording({'sample_rate': 16000, 'channels': 1, 'frame_duration': 120}, mode='auto')
+    recording.add(b'x' * 200)  # speech
+    assert any(recording.add(b'x' * 14) for _ in range(7))  # 120 ms silence packets: 840 ms of quiet ends it

@@ -258,8 +258,9 @@ headers are ignored. The input parameters are retained for wrapping microphone p
 
 `listen start` collects packets; `listen stop` submits one v1 audio/ogg query, with an empty text and a fresh id.
 Only recordings containing a speech-sized packet (over 12 bytes and over half a byte per millisecond of frame,
-for example over 30 bytes at 60 ms or 12 bytes at 20 ms) are submitted. In `auto` / `realtime`, 800 ms of quiet
-packets (at most 12 bytes each, after speech) also ends the recording. Recordings end at 15 seconds of wall or
+for example over 30 bytes at 60 ms or 12 bytes at 20 ms) are submitted. Size cannot tell constant-bitrate
+silence from speech, so a silent recording may still be transcribed (and answered with "I couldn't hear that."). In `auto` / `realtime`, 800 ms of quiet
+packets (at most 12 bytes each, or an eighth of a byte per ms for long frames, after speech) also ends the recording. Recordings end at 15 seconds of wall or
 audio time, or at 240,000 bytes of Opus. Packets over 1500 bytes are ignored, and a WebSocket message over 64 KiB
 closes the connection. `listen detect`, MCP and unknown types are ignored. `abort`
 cancels queued/current playback; it submits `/stop` only if this connection owns the active unanswered turn.
