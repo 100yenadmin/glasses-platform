@@ -568,3 +568,15 @@ async def test_a_hello_ack_with_null_server_does_not_break_responses():
         query = await peer.next('query')
         await peer.send({'type': 'response', 'turn': query['id'], 'text': 'fine'})
         assert (await answer).text == 'fine'
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_answer_larger_than_aiohttp_default_still_arrives():
+    async with connected(caps={'audio_out': ['audio/wav']}, features=('audio_out',)) as peer:
+        answer = asyncio.create_task(peer.client.ask(text='long', timeout=5))
+        query = await peer.next('query')
+        await peer.send({'type': 'response', 'turn': query['id'], 'text': 'here'})
+        big = 'A' * (5 * 1024 * 1024)  # over aiohttp's 4 MiB receive default
+        await peer.sockets[-1].send_json({'type': 'audio', 'ref': query['id'], 'mime': 'audio/wav', 'data': big})
+        result = await answer
+        assert result.text == 'here' and len(result.audio['data']) == len(big)

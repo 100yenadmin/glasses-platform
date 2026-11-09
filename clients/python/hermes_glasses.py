@@ -30,9 +30,12 @@ class TurnResult:
 
 
 class HermesGlassesClient:
-    def __init__(self, url, token, device, app=None, reconnect=True):
+    # Spoken answers arrive as one base64 frame; aiohttp's 4 MiB default would close the socket on a long WAV.
+    MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+
+    def __init__(self, url, token, device, app=None, reconnect=True, max_message_size=MAX_MESSAGE_BYTES):
         self.url, self.token, self.device = url, token, device
-        self.app, self.reconnect = app, reconnect
+        self.app, self.reconnect, self.max_message_size = app, reconnect, max_message_size
         self.on_capture_photo = None
         self.ready = False
         self.handshake = None
@@ -109,7 +112,8 @@ class HermesGlassesClient:
                 raise
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None)) as session:
                 async with asyncio.timeout(10):
-                    ws = await session.ws_connect(self.url, headers={'Authorization': 'Bearer ' + self.token})
+                    ws = await session.ws_connect(self.url, headers={'Authorization': 'Bearer ' + self.token},
+                                                  max_msg_size=self.max_message_size)
                 async with ws:
                     self._socket, self._outbox = ws, asyncio.Queue()
                     writer = asyncio.create_task(self._write(ws, self._outbox))

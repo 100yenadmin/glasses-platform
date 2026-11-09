@@ -52,7 +52,8 @@ or an error with no queries in flight. Unknown fields and frame types are ignore
 `TurnResult(id, text, transcript, audio)`; absent transcript/audio are `None`.
 Media uses dicts with `data` (base64) and `mime`; input audio may include `rate`.
 Ids must be unique among pending asks and interrupts; defaults are unique per client.
-Replies may arrive out of order. Audio waits up to 15 seconds after text only when
+Replies may arrive out of order. Messages up to 32 MiB are accepted (long spoken answers
+arrive as one frame); pass `max_message_size=` to change it. Audio waits up to 15 seconds after text only when
 both the device and server declare `audio_out`; `speak=False` skips that wait.
 The total timeout is in seconds; `timeout=0` or `None` disables it. Timeouts raise
 `HermesGlassesError` with `code='timeout'`. Cancelling an ask task removes only its
