@@ -175,3 +175,11 @@ short offline queue until a device reconnects.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Build a companion client
+
+The dependency-free [JavaScript client](clients/js/README.md) speaks protocol v1 over
+WebSocket or HTTP, with injectable transports for phone runtimes. The
+[conformance kit](conformance/README.md) checks a server or runs a scripted local
+server for client authors. Planned server features still depend on the installed
+server's advertised capabilities.
