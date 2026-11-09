@@ -122,3 +122,11 @@ def test_pair_prints_no_url_when_the_env_write_is_refused(home, capsys, monkeypa
     assert run('pair', 'alice', 'rayban', '--no-qr') == 1
     out = capsys.readouterr().out
     assert 'token=' not in out and 'Nothing was paired' in out
+
+
+def test_revoke_reports_a_refused_env_write(home, capsys, monkeypatch):
+    run('pair', 'alice', 'rayban', '--no-qr')
+    run('pair', 'alice', 'phone', '--no-qr')
+    monkeypatch.setattr('hermes_cli.config.save_env_value', lambda key, value: None)
+    assert run('revoke', 'alice', 'rayban') == 1
+    assert 'still paired' in capsys.readouterr().out

@@ -120,6 +120,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
         self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
         self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
+        self._approval_sessions = {}  # user -> Hermes session keys that have asked this user's devices for approval
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -281,7 +282,7 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user
-        choice = spoken_choice(text) if self._approvals.get(user) else None
+        choice = spoken_choice(text) if self._approval_sessions.get(user) else None
         if choice and await self._answer_approval(conn, frame.get('id'), choice):
             return
         turn_id = frame.get('id')
@@ -535,6 +536,7 @@ class GlassesAdapter(BasePlatformAdapter):
         if user not in {identity.user for identity in self._tokens.values()}:
             return SendResult(success=False, error='Unknown glasses user')
         self._live_approvals(user)  # forget requests that ended, so they can never be confused with this one
+        self._approval_sessions.setdefault(user, set()).add(prompt.session_key)
         request_id = getattr(prompt, 'request_id', None)
         if not request_id:  # Hermes before 0.23 does not pass it: take the one new request in the session's queue
             known = {a.request_id for a in self._approvals.get(user, [])}
@@ -567,31 +569,34 @@ class GlassesAdapter(BasePlatformAdapter):
         return live
 
     async def _answer_approval(self, conn, query_id, choice):
-        """Answer the one approval this user's devices are waiting on with a spoken yes or no. False when none is
-        waiting, a clarify question is open, or "yes" is not offered: the words then go to the agent. When it is
-        not certain which request the words answer (two waiting, one that ended just now, one not yet shown),
-        nothing is resolved and the device is told how to answer."""
-        from tools.approval import resolve_gateway_approval
+        """Answer the one approval this user's devices are waiting on with a spoken yes or no.
+
+        False (the words go to Hermes) when no approval is waiting or a clarify question is open. Hermes itself
+        takes a bare "yes" as /approve for the OLDEST waiting request, so whenever any request waits and it is not
+        certain which one the words answer (two waiting, one this adapter could not identify, one that ended
+        mid-answer, one not yet shown), the words are kept here, nothing is resolved, and the device is told how
+        to answer."""
+        from tools.approval import list_gateway_approvals, resolve_gateway_approval
         from tools import clarify_gateway
         user = conn.identity.user
+        sessions = self._approval_sessions.get(user, set())
+        queued = {d.get('request_id') for key in sessions for d in list_gateway_approvals(key)}
+        if not queued:
+            self._approvals.pop(user, None)
+            return False
+        if any(clarify_gateway.has_pending(key) for key in sessions):
+            return False  # the agent asked a question: Hermes routes a yes or no to its clarify handler first
         known = len(self._approvals.get(user, []))
         live = self._live_approvals(user)
-        if not live:
-            return False
-        if any(clarify_gateway.has_pending(a.session_key) for a in live):
-            return False  # the agent asked a question: a yes or no answers that (Hermes' clarify handler)
-        if len(live) > 1 or len(live) != known or not live[0].shown:
-            await self._deliver_reply(user, conn, query_id, 'I was not sure which command that answers, so I did not '
-                                      'act on it. Answer with /approve or /deny.')
-            return True
-        approval = live[0]
-        if choice not in approval.choices:
-            return False  # e.g. "yes" when only deny is offered: the agent hears it
-        if not resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
+        approval = live[0] if len(live) == 1 else None
+        if (approval and approval.shown and known == 1 and queued == {approval.request_id}
+                and choice in approval.choices
+                and resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id)):
+            self._approvals.pop(user, None)
+            said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
+        else:
             self._live_approvals(user)
-            return False  # settled a moment ago
-        self._approvals.pop(user, None)
-        said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
+            said = 'I was not sure which command that answers, so I did not act on it. Answer with /approve or /deny.'
         await self._deliver_reply(user, conn, query_id, said)
         return True
 

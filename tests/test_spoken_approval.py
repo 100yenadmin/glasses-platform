@@ -176,12 +176,33 @@ async def test_an_answer_to_a_request_that_just_ended_never_moves_to_the_next(he
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('recorded', [False, True])
+async def test_a_waiting_request_the_adapter_could_not_identify_keeps_a_yes_from_hermes(hermes, recorded):
+    """Hermes routes a bare "yes" to /approve for its OLDEST request: it must not get one while an unknown request waits."""
+    adapter, client, calls, resolve = hermes
+    ray = await opened(client, version=1)
+    if recorded:
+        await ask_approval(adapter, resolve, 'r1')
+        resolve.queue.append('r2')  # a second request whose prompt went out as Hermes' text fallback
+    else:
+        bare = ExecApprovalPrompt(**{f.name: getattr(prompt(), f.name) for f in fields(ExecApprovalPrompt)
+                                     if f.name != 'request_id'})
+        resolve.queue[:] = ['a', 'b']  # two parallel requests on Hermes 0.22.2: neither identifiable
+        assert not (await adapter._send_exec_approval_prompt(bare)).success
+    await say(ray, 'yes')
+    assert (await until(ray, 'response'))['text'].startswith('I was not sure')
+    assert calls == [] and adapter.handle_message.await_count == 0
+    await ray.close()
+
+
+@pytest.mark.asyncio
 async def test_a_request_not_yet_shown_is_never_answered(hermes):
     from glasses_plugin.adapter import Approval
     adapter, client, calls, resolve = hermes
     ray = await opened(client, version=1)
     resolve.queue.append('r9')
     adapter._approvals['alice'] = [Approval('agent:main:glasses:dm:alice', 'r9', ['once', 'deny'], 0.0)]  # push pending
+    adapter._approval_sessions['alice'] = {'agent:main:glasses:dm:alice'}
     await say(ray, 'yes')
     assert (await until(ray, 'response'))['text'].startswith('I was not sure') and calls == []
     await ray.close()
@@ -217,9 +238,9 @@ async def test_yes_never_approves_more_than_offered(hermes):
     ray = await opened(client, version=1)
     await ask_approval(adapter, resolve, actions=[('Deny', 'deny', 'danger')])
     assert 'Say no to block it.' in (await until(ray, 'push'))['text']
-    await say(ray, 'yes')
-    await asyncio.sleep(0.1)
-    assert calls == [] and adapter.handle_message.await_count == 1
+    await say(ray, 'yes')  # kept here: Hermes would take a bare "yes" as /approve
+    assert (await until(ray, 'response'))['text'].startswith('I was not sure')
+    assert calls == [] and adapter.handle_message.await_count == 0
     await say(ray, 'no', 'q2')
     assert (await until(ray, 'response'))['turn'] == 'q2' and calls[0][1] == 'deny'
     await ray.close()

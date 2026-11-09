@@ -151,6 +151,9 @@ def revoke(args):
               '(platforms.glasses.extra.devices) that would apply again. Remove them there, then run this again.')
         return 1
     _save(kept)
+    if any(e[:2] == (args.user, args.device) for e in _entries()):  # the .env write was refused
+        print(f'Could not update the profile .env (see the message above); {args.user}:{args.device} is still paired.')
+        return 1
     print(f'Revoked {args.user}:{args.device}. Restart the gateway (`hermes gateway restart`) to disconnect it.')
     yaml = parse_devices(_yaml_devices()) if _yaml_devices().strip() else {}
     if any((i.user, i.device) == (args.user, args.device) for i in yaml.values()):
