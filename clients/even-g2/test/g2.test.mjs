@@ -204,3 +204,22 @@ test('#44 review: the first ask timing out while the answer is on its way does n
   await talk(app, [3]);
   assert.equal(socket.sent.at(-1).audio.data, 'Aw==');  // the turn ended
 });
+test('#44 review: two questions in one turn; the deadline follows the latest answer', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  t.mock.timers.tick(100000);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  t.mock.timers.tick(100000);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Lock it now?'});
+  await talk(app, [3]);
+  const second = socket.sent.at(-1);
+  t.mock.timers.tick(180001); await flush();  // the first ask and the first answer have both timed out
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  socket.frame({type: 'response', turn: second.id, text: 'Locked the back door now.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door now.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [4]);
+  assert.equal(socket.sent.at(-1).audio.data, 'BA==');
+});

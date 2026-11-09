@@ -70,7 +70,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     catch (error) {
       // The wearer's thinking time counts against this ask's timeout: once an answer is on its way, that answer
       // (which Hermes folds into this turn) decides how the turn ends.
-      if (error?.code === 'timeout' && answering) await answering;
+      if (error?.code === 'timeout' && answering) { while (answering) await answering; }  // follows the latest answer
       else if (error?.code !== 'aborted') fail();
     }
     finally {
@@ -85,7 +85,10 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     const own = chain; prompt = null; show('thinking', 'Thinking…');
     const mine = answering = (async () => {
       try { settle(await client.ask({...query, speak: false, signal: own?.signal})); own?.abort(); }
-      catch (error) { if (error?.code !== 'aborted') fail(); }
+      catch (error) {
+        // A later question superseded this answer: Hermes replies on the latest one, so this timeout is expected.
+        if (error?.code !== 'aborted' && !(error?.code === 'timeout' && answering !== mine)) fail();
+      }
     })();
     try { await mine; } finally { if (answering === mine) answering = null; }
   }
