@@ -146,8 +146,8 @@ short offline queue until a device reconnects.
   and starts no background processes beyond its listener.
 - **Tokens** are read through Hermes's per-profile settings reader, from `~/.hermes/.env` or `config.yaml`.
 - **Offline queue.** Pushes for a disconnected device wait (50 items, 24 hours) in memory and in
-  `~/.hermes/glasses/outbox.json` (readable only by you), so they survive a gateway restart. A message leaves the file
-  when it is handed to a device. `GLASSES_OUTBOX_PERSIST=off` keeps the queue in memory only.
+  `~/.hermes/glasses/outbox.json` (readable only by you), so they survive a gateway restart, even a crash. A message leaves
+  the file once it has been sent to a device. `GLASSES_OUTBOX_PERSIST=off` keeps the queue in memory only.
 
 ## Why a plugin rather than a bridge script
 

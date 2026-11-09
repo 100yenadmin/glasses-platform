@@ -274,7 +274,9 @@ class GlassesAdapter(BasePlatformAdapter):
         # Never settled or still held: keep its pushes for the next connection, unless another device already
         # received them.
         delivered = self._delivered.get(conn.identity.user, ())
-        self.outbox.merge(conn.identity.user, [item for item in [*conn.pending, *conn.held] if item[3] not in delivered])
+        left = [*conn.pending, *conn.held]
+        self.outbox.merge(conn.identity.user, [item for item in left if item[3] not in delivered])
+        self.outbox.forget([item[3] for item in left if item[3] in delivered])
         conn.pending, conn.held = [], []
 
     async def _new_session(self, conn, query_id=None):
@@ -389,6 +391,7 @@ class GlassesAdapter(BasePlatformAdapter):
 
     def _mark_delivered(self, user, message_id):
         self._delivered.setdefault(user, deque(maxlen=500)).append(message_id)
+        self.outbox.sent(message_id)
 
     async def _flush_later(self, conn, delay):
         await asyncio.sleep(delay)
@@ -409,6 +412,7 @@ class GlassesAdapter(BasePlatformAdapter):
 
     def _hold(self, conn, item):
         conn.held.append(item)
+        self.outbox.track(conn.identity.user, item)
         if conn.held_task is None:
             conn.held_task = self._spawn(self._release_held_later(conn))
 
@@ -437,6 +441,7 @@ class GlassesAdapter(BasePlatformAdapter):
             if sent < len(items):  # closed or cancelled: the rest waits for the next connection
                 delivered = self._delivered.get(user, ())
                 self.outbox.merge(user, [item for item in items[sent:] if item[3] not in delivered])
+                self.outbox.forget([item[3] for item in items[sent:] if item[3] in delivered])
 
     async def _answered(self, conn, query_id):
         """The device got its answer (or its error): pushes held behind it follow now."""
@@ -460,7 +465,9 @@ class GlassesAdapter(BasePlatformAdapter):
             reached = False
             for conn in self.registry.live(user):
                 if not conn.flushed:
-                    conn.pending.append((time.time(), content, origin, message_id))
+                    item = (time.time(), content, origin, message_id)
+                    conn.pending.append(item)
+                    self.outbox.track(user, item)
                     reached = True
                 elif self._holds(conn, origin):
                     self._hold(conn, (time.time(), content, origin, message_id))
