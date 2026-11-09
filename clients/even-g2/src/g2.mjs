@@ -10,7 +10,7 @@ export function label63(value) {
 export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSocketImpl = globalThis.WebSocket) {
   let client, turn = false, recording = false, micBusy = false, closed = false, timer, renderTimer, pushTimer, pushing = false;
   let transcript = '', answer = '', content = textBox.content, state = '', approval, selected = 0, page = 'text';
-  let prompt = null, chain = null, forPrompt = false;  // a question Hermes asked mid-turn; one abort for the turn's asks
+  let prompt = null, chain = null, forPrompt = false, answering = null;  // a question Hermes asked mid-turn; one abort for the turn's asks
   let queue = Promise.resolve();
   const pushes = [], approvals = [];
   const serial = fn => (queue = queue.then(fn).catch(() => { fail(); }));
@@ -67,7 +67,12 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     turn = true; prompt = null; transcript = ''; answer = ''; show('thinking', 'Thinking…');
     const own = chain = new AbortController();
     try { settle(await client.ask({...query, speak: false, signal: own.signal})); }
-    catch (error) { if (error?.code !== 'aborted') fail(); }
+    catch (error) {
+      // The wearer's thinking time counts against this ask's timeout: once an answer is on its way, that answer
+      // (which Hermes folds into this turn) decides how the turn ends.
+      if (error?.code === 'timeout' && answering) await answering;
+      else if (error?.code !== 'aborted') fail();
+    }
     finally {
       own.abort();  // the answer to a mid-turn question is still waiting: this reply ended the turn
       if (chain === own) chain = null;
@@ -78,8 +83,11 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     // The wearer answers a question Hermes asked during the turn. Hermes folds the answer into the running turn,
     // so the turn's final reply may come back on this ask or on the first one: whichever arrives ends both.
     const own = chain; prompt = null; show('thinking', 'Thinking…');
-    try { settle(await client.ask({...query, speak: false, signal: own?.signal})); own?.abort(); }
-    catch (error) { if (error?.code !== 'aborted') fail(); }
+    const mine = answering = (async () => {
+      try { settle(await client.ask({...query, speak: false, signal: own?.signal})); own?.abort(); }
+      catch (error) { if (error?.code !== 'aborted') fail(); }
+    })();
+    try { await mine; } finally { if (answering === mine) answering = null; }
   }
   async function tap() {
     if (micBusy || closed) return;
@@ -121,7 +129,9 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       client.on('transcript', frame => { transcript = frame.text; });
       client.on('delta', frame => { answer = frame.text; if (!prompt) show('answer', `${transcript}\n${answer}`); });
       client.on('push', frame => {
-        if (PROMPTS.has(frame.origin)) { prompt = frame; if (!recording) next(); return; }  // shown at once, even mid-turn
+        // A question this device's turn waits on is shown at once and stays until answered or the turn ends.
+        // Without a local turn (asked elsewhere, or replayed later) it is an ordinary push and cannot stick.
+        if (PROMPTS.has(frame.origin) && turn) { prompt = frame; if (!recording) next(); return; }
         pushes.push(frame); if (!turn && !recording && !approval) next();
       });
       // glasses_show_text: shown like a push, after the turn and between other pushes.
@@ -138,7 +148,8 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     pause() {  // leaving the foreground: stop the mic, keep the app and its connection
       if (!recording) return;
       clearTimeout(timer); recording = false; chunks = [];
-      serial(() => bridge.audioControl(false)); show('answer', 'Tap to talk to Hermes');
+      serial(() => bridge.audioControl(false));
+      if (turn) next(); else show('answer', 'Tap to talk to Hermes');
     },
     exit() { serial(() => bridge.shutDownPageContainer(1)); },
     close() { closed = true; clearTimeout(timer); clearTimeout(renderTimer); clearTimeout(pushTimer); recording = false;

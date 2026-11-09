@@ -115,14 +115,15 @@ test('pushes in a burst each get their turn on the lens; display frames show lik
 async function connectedApp(t) {
   t.mock.timers.enable({apis: ['setTimeout']});
   t.mock.method(console, 'log', () => {});
-  const views = [], mic = [];
+  const views = [], mic = [], pages = [];
   const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; },
-    textContainerUpgrade: async () => {}, rebuildPageContainer: async () => {}}, {}, (state, text) => views.push([state, text]), Socket);
+    textContainerUpgrade: async () => {}, rebuildPageContainer: async page => pages.push(page)}, {height: 288},
+    (state, text) => views.push([state, text]), Socket);
   t.after(() => app.close());
   const connected = app.connect('ws://fixture/voice', 'fixture');
   const socket = Socket.last;
   socket.frame({type: 'hello_ack'}); await connected;
-  return {app, socket, views, mic};
+  return {app, socket, views, mic, pages};
 }
 async function talk(app, bytes) { await app.tap(); app.pcm(new Uint8Array(bytes)); await app.tap(); await flush(); }
 test('#44: a clarify question mid-turn shows at once and a tap answers it; the folded reply ends the turn', async t => {
@@ -139,7 +140,7 @@ test('#44: a clarify question mid-turn shows at once and a tap answers it; the f
   // The adapter folds the answer into the running turn: the turn's final reply comes back on the answer's id.
   socket.frame({type: 'response', turn: answer.id, text: 'Opened the front door.'}); await flush();
   assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Opened the front door.')));
-  assert.ok(!views.some(([kind]) => kind === 'error'));  // the first ask was aborted, not failed
+  assert.ok(!views.some(([kind]) => kind === 'error'));  // the first ask's release shows no error (the tap below proves the turn ended)
   t.mock.timers.tick(1500); await flush();
   assert.deepEqual(views.at(-1), ['push', 'Reminder\nStretch']);  // ordinary pushes still wait for the turn
   t.mock.timers.tick(4000); await flush();
@@ -169,4 +170,37 @@ test('#44: without a question, a tap during a turn still does nothing', async t 
   const sent = socket.sent.length;
   await app.tap(); await flush();
   assert.equal(socket.sent.length, sent); assert.deepEqual(mic, [true, false]);
+});
+test('#44 review: with no local turn, a clarify push is an ordinary push and cannot stick on the lens', async t => {
+  const {socket, views} = await connectedApp(t);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});  // asked by another device's turn, or replayed later
+  socket.frame({type: 'push', origin: 'cron', text: 'Stretch'});
+  assert.deepEqual(views.at(-1), ['push', 'Hermes\nWhich door?']);
+  t.mock.timers.tick(4000); await flush();
+  assert.deepEqual(views.at(-1), ['push', 'Reminder\nStretch']);
+});
+test('#44 review: an approval card takes the lens over a mid-turn question, which comes back after', async t => {
+  const {app, socket, views, pages} = await connectedApp(t);
+  await talk(app, [1]);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  socket.frame({type: 'approval_request', id: 'a', text: 'Run it?', choices: ['once', 'deny']}); await flush();
+  assert.ok(pages.at(-1).listObject);
+  socket.frame({type: 'approval_closed', id: 'a'}); await flush();
+  assert.deepEqual(views.at(-1), ['push', 'Hermes asks\nWhich door?\nTap to answer']);
+});
+test('#44 review: the first ask timing out while the answer is on its way does not drop the reply', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  t.mock.timers.tick(100000);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  const answer = socket.sent.at(-1);
+  t.mock.timers.tick(80001); await flush();  // the first ask's 180 s timeout passes
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  socket.frame({type: 'response', turn: answer.id, text: 'Locked the back door.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [3]);
+  assert.equal(socket.sent.at(-1).audio.data, 'Aw==');  // the turn ended
 });
