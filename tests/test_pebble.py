@@ -383,6 +383,7 @@ async def test_no_path_token_or_prompt_in_info_logs_on_real_listener(server, mon
     ([' Hello world ▉'], 'Hello world', ' Hello world'),  # Hermes strips the final reply's whitespace
     (['Hello world ▉'], 'Hello', 'Hello world'),  # a shorter final is already on the watch
     (['Looking.', 'The answer'], 'The answer is 42.', 'Looking.\n\nThe answer is 42.'),
+    (['Answer one.', 'Answer', 'Answer two.'], 'Answer two.', 'Answer one.\n\nAnswer two.'),  # a shorter new segment
 ])
 async def test_final_reply_never_repeats_streamed_text(server, monkeypatch, deltas, final, shown):
     adapter, client = server

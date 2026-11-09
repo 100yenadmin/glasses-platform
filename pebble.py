@@ -28,14 +28,14 @@ def _text(text, final=False):
     return text
 
 
-def _extension(previous, visible):
+def _extension(previous, visible, final=False):
     """What the watch still needs: Bobby can only append, and Hermes trims whitespace from its final text."""
     if visible.startswith(previous):
         return visible[len(previous):]
     shown, text = previous.strip(), visible.strip()
-    if text.startswith(shown):
+    if final and text.startswith(shown):
         return text[len(shown):]
-    if shown.startswith(text):
+    if final and shown.startswith(text):
         return ''  # already on the watch (a trimmed or shortened final)
     return '\n\n' + visible if previous else visible  # a new segment after a tool call
 
@@ -96,7 +96,7 @@ class BobbyApi:
                 nonlocal previous
                 visible = _text(text, final)
                 # Hermes can begin a new cumulative segment after a tool call.
-                extra = _extension(previous, visible)
+                extra = _extension(previous, visible, final)
                 if extra:
                     await ws.send_str('c' + extra)
                 previous = visible
