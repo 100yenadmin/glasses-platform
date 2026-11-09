@@ -187,7 +187,13 @@ class Outbox:
             self._save()
 
     def sent(self, message_id):
-        if self._inflight.pop(message_id, None) is not None:
+        """A device received it: drop it from the file, and any queued copy (another device's leftovers)."""
+        changed = self._inflight.pop(message_id, None) is not None
+        for user, items in self._items.items():
+            if any(item[3] == message_id for item in items):
+                self._items[user] = deque((i for i in items if i[3] != message_id), maxlen=self.maxlen)
+                changed = True
+        if changed:
             self._save()
 
     def forget(self, message_ids):

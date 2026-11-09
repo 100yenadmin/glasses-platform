@@ -34,6 +34,8 @@ def test_held_and_pending_pushes_stay_in_the_file_until_sent_or_forgotten(tmp_pa
     box.track('alice', (1e12, 'x', 'cron', 'x1'))
     box.merge('alice', [(1e12, 'x', 'cron', 'x1')])  # back in the queue: one copy
     assert [i[3] for i in Outbox(path=path).drain('alice')] == ['x1']
+    box.sent('x1')  # a second device that also held it sent it: the queued copy goes too
+    assert Outbox(path=path).drain('alice') == [] and box.drain('alice') == []
 
 
 def test_expired_items_are_dropped_at_load_and_the_bound_holds(tmp_path):
