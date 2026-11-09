@@ -316,7 +316,7 @@ class GlassesAdapter(BasePlatformAdapter):
         live = self.registry.live(conn.identity.user)
         if conn in live:
             return conn
-        return next((other for other in reversed(live) if other.identity == conn.identity), None)
+        return next((other for other in reversed(live) if other.identity == conn.identity and not other.slot), None)
 
     async def _process_query(self, conn, frame, reset=False):
         self._silent[(conn.identity.user, frame.get('id'))] = frame.get('speak') is False
@@ -549,7 +549,8 @@ class GlassesAdapter(BasePlatformAdapter):
         turn = self._active_turn.get(user)
         final = metadata.get('notify') and not metadata.get('_interim_send')
         owner = metadata.get('reply_to_message_id')  # stream-consumer writes name the query they belong to
-        if final and reply_to in self._queries and not (turn and reply_to in turn.ids):
+        asker = self._queries.get(reply_to) if reply_to is not None else None
+        if final and asker is not None and asker.identity.user == user and not (turn and reply_to in turn.ids):
             # A command answered inline while a turn runs (/stop, /status): the reply to that query alone.
             if turn and reply_to in turn.arrivals:
                 turn.arrivals.remove(reply_to)

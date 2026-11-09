@@ -232,15 +232,69 @@ async def test_pending_invalid_wait(server, value):
     assert (await client.get('/pending?wait=' + value, headers=AUTH)).status == 400
 
 
-async def test_same_device_replaces_pending_and_wakes_it(server, monkeypatch):
+async def test_requests_of_one_device_never_replace_each_other_or_its_socket(server, monkeypatch):
     adapter, client = server
     connections = watch_connections(adapter, monkeypatch)
-    first = asyncio.create_task(client.get('/pending?wait=55', headers=AUTH))
+    first = asyncio.create_task(client.get('/pending?wait=0.5', headers=AUTH))
     old = await asyncio.wait_for(connections.get(), 2)
     second = await client.get('/pending?wait=0', headers=AUTH)
-    response = await asyncio.wait_for(first, 2)
-    assert old.ws.closed
-    assert await response.json() == await second.json() == {'items': []}
+    assert not old.ws.closed or first.done()  # the second request did not close the first
+    assert await second.json() == {'items': []}
+    response = await asyncio.wait_for(first, 3)
+    assert await response.json() == {'items': []}
+
+
+async def test_http_request_does_not_close_the_devices_websocket(server, monkeypatch):
+    adapter, client = server
+    from glasses_plugin.devices import Connection, Identity
+
+    class Socket:
+        closed = False
+        async def close(self, code=1000, message=b''):
+            self.closed = True
+        async def send_json(self, frame):
+            pass
+    socket_conn = Connection(Socket(), Identity('alice', 'rayban'), protocol=1)
+    await adapter.registry.add(socket_conn)
+    response = await client.get('/pending?wait=0', headers=AUTH)
+    assert response.status == 200 and not socket_conn.ws.closed
+    assert socket_conn in adapter.registry.live('alice')
+
+
+async def test_stale_queued_prompt_does_not_end_a_new_turn(server):
+    adapter, client = server
+    await adapter.send('alice', 'Old approval?', metadata={'glasses_prompt': 'approval'})  # queued: nobody live
+    reply_with(adapter, 'Fresh answer.')
+    response = await client.post('/turn', headers=AUTH, json={'text': 'What time is it?'})
+    result = await response.json()
+    assert result['status'] == 'done' and result['text'] == 'Fresh answer.'
+    assert [p['text'] for p in result['pushes']] == ['Old approval?']
+
+
+async def test_answer_that_cannot_be_written_requeues_pushes_and_reply(server, monkeypatch):
+    adapter, client = server
+    await adapter.send('alice', 'queued reminder', metadata={'origin': 'cron'})
+    reply_with(adapter, 'Lost answer.')
+
+    async def broken(self, request):
+        raise ConnectionResetError('client went away')
+    monkeypatch.setattr(http_api.web.Response, 'prepare', broken)
+    try:
+        await client.post('/turn', headers=AUTH, json={'text': 'Hello'})
+    except Exception:  # the server drops the connection: that is the point
+        pass
+    monkeypatch.undo()
+    texts = [item[1] for item in adapter.outbox.drain('alice')]
+    assert 'queued reminder' in texts and 'Lost answer.' in texts
+
+
+async def test_camera_capability_is_ignored_for_http(server, monkeypatch):
+    adapter, client = server
+    connections = watch_connections(adapter, monkeypatch)
+    reply_with(adapter)
+    await client.post('/turn', headers=AUTH, json={'text': 'Hello', 'capabilities': {'camera': True, 'buttons': True}})
+    conn = await asyncio.wait_for(connections.get(), 2)
+    assert conn.capabilities == {'buttons': True}
 
 
 @pytest.mark.parametrize('position', ['before_close', 'during_close'])
@@ -295,9 +349,8 @@ async def test_plain_text(server, monkeypatch, outcome, expected, status):
     assert await response.text() == expected
 
 
-@pytest.mark.parametrize('terminal,expected', [({'type': 'error', 'message': 'Could not hear.'}, 'Could not hear.'),
-                                            ({'type': 'session_reset'}, '')])
-async def test_error_and_session_reset_end_turn(server, monkeypatch, terminal, expected):
+@pytest.mark.parametrize('terminal,expected', [({'type': 'error', 'message': 'Could not hear.'}, 'Could not hear.')])
+async def test_error_ends_turn(server, monkeypatch, terminal, expected):
     adapter, client = server
 
     async def query(conn, frame):

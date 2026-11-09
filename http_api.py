@@ -31,6 +31,13 @@ class HttpSocket:
         self.changed.set()
 
 
+def _capabilities(body):
+    capabilities = (body or {}).get('capabilities')
+    capabilities = dict(capabilities) if isinstance(capabilities, dict) else {}
+    capabilities.pop('camera', None)  # a request cannot answer capture_photo
+    return capabilities
+
+
 def _is_prompt(frame):
     return frame.get('type') == 'approval_request' or (
         frame.get('type') == 'push' and frame.get('origin') in PROMPT_ORIGINS)
@@ -40,10 +47,12 @@ def _is_push(frame):
     return frame.get('type') in ('push', 'approval_request')
 
 
-def _terminal(frames, turn_id):
-    return next((frame for frame in frames if _is_prompt(frame) or
-                 frame.get('type') in ('error', 'session_reset') or
-                 (frame.get('type') == 'response' and frame.get('turn') == turn_id)), None)
+def _terminal(frames, turn_id, start=0):
+    """What ends this turn's request: its own reply first, else a prompt or an error that arrived after the query
+    was sent (prompts and errors queued before it belong to earlier turns and are returned as pushes)."""
+    later = frames[start:]
+    reply = next((frame for frame in later if frame.get('type') == 'response' and frame.get('turn') == turn_id), None)
+    return reply or next((frame for frame in later if _is_prompt(frame) or frame.get('type') == 'error'), None)
 
 
 async def _wait_for(socket, ready, seconds):
@@ -72,6 +81,31 @@ async def _finish(adapter, conn):
     return frames
 
 
+def _requeue(adapter, user, frames, reply=None):
+    """The answer never reached the device: put its pushes (and the turn's reply) back in the queue, with their ids."""
+    now = time.time()
+    items = [(now, item.get('text', ''), item.get('origin', 'message'), item['id'])
+             for item in frames if item.get('type') == 'push' and item.get('id')]
+    if reply:
+        items.append((now, reply, 'reply', uuid4().hex))
+    adapter.outbox.merge(user, items)
+
+
+async def _send(request, adapter, user, response, frames, reply=None):
+    """Write the answer now, so a client that went away is noticed and nothing it was sent is lost."""
+    transport = request.transport
+    try:
+        if transport is None or transport.is_closing():
+            raise ConnectionResetError('client went away')
+        await response.prepare(request)
+        await response.write_eof()
+    except (ConnectionError, RuntimeError, asyncio.CancelledError) as exc:
+        _requeue(adapter, user, frames, reply)
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+    return response
+
+
 async def handle_approval(adapter, conn, body):
     # TODO(approval lane): validate and dispatch the shared approval_response handler.
     return web.json_response({'error': 'not yet'}, status=501)
@@ -89,9 +123,9 @@ class HttpApi:
         identity = authenticate(token, self.adapter._tokens)
         if identity is None:
             raise web.HTTPUnauthorized(text='{"error":"unauthorized"}', content_type='application/json')
-        capabilities = (body or {}).get('capabilities')
-        return Connection(HttpSocket(), identity, protocol=1,
-                          capabilities=capabilities if isinstance(capabilities, dict) else {})
+        # Its own registry slot: an HTTP request never replaces the device's WebSocket or another open request.
+        return Connection(HttpSocket(), identity, protocol=1, slot=f'{identity.device}#http-{uuid4().hex}',
+                          capabilities=_capabilities(body))
 
     async def _body(self, request):
         try:
@@ -108,25 +142,29 @@ class HttpApi:
         text = body.get('text')
         if not (isinstance(text, str) and text.strip()) and not isinstance(body.get('audio'), dict):
             raise web.HTTPBadRequest(text='{"error":"text or audio required"}', content_type='application/json')
-        capabilities = body.get('capabilities')
-        conn.capabilities = capabilities if isinstance(capabilities, dict) else {}
+        conn.capabilities = _capabilities(body)
         turn_id = body.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
         frame = {key: body[key] for key in ('text', 'audio', 'image', 'speak') if key in body}
         frame.update(type='query', id=turn_id)
         conn.asking[turn_id] = time.monotonic()
+        user, start, frames = conn.identity.user, 0, []
         try:
             await self.adapter.registry.add(conn)
             await self.adapter._flush_outbox(conn)
+            start = len(conn.ws.frames)  # queued pushes end here; this turn's frames follow
             self.adapter._spawn(self.adapter._process_query(conn, frame))
-            await _wait_for(conn.ws, lambda frames: _terminal(frames, turn_id) is not None, self.turn_timeout)
-            terminal = _terminal(conn.ws.frames, turn_id)
+            await _wait_for(conn.ws, lambda frames: _terminal(frames, turn_id, start) is not None, self.turn_timeout)
+            terminal = _terminal(conn.ws.frames, turn_id, start)
             if terminal is not None and not _is_prompt(terminal) and conn.capabilities.get('audio_out'):
                 await _wait_for(conn.ws, lambda frames: any(
                     item.get('type') == 'audio' and item.get('ref') == turn_id for item in frames), AUDIO_TIMEOUT)
-        finally:
+        except asyncio.CancelledError:
             frames = await _finish(self.adapter, conn)
-        terminal = _terminal(frames, turn_id)
+            _requeue(self.adapter, user, frames)
+            raise
+        frames = await _finish(self.adapter, conn)
+        terminal = _terminal(frames, turn_id, start)
         result = {'id': turn_id, 'status': 'pending', 'pushes': []}
         prompts = []
         if terminal is not None:
@@ -143,12 +181,15 @@ class HttpApi:
                               and item.get('ref') == turn_id), None)
                 if audio is not None:
                     result['audio'] = {key: audio[key] for key in ('data', 'mime')}
-        result['pushes'] = [item for item in frames if item.get('type') == 'push' and item not in prompts]
+        result['pushes'] = [item for item in frames if _is_push(item) and item not in prompts]
         status = 202 if result['status'] == 'pending' else 200
+        reply = result.get('text') if result['status'] == 'done' and terminal.get('type') == 'response' else None
         if 'text/plain' in request.headers.get('Accept', '').lower():
             text = '\n'.join(str(item.get('text', '')) for item in prompts) if prompts else result.get('text', '')
-            return web.Response(text=text, status=status, content_type='text/plain')
-        return web.json_response(result, status=status)
+            response = web.Response(text=text, status=status, content_type='text/plain')
+        else:
+            response = web.json_response(result, status=status)
+        return await _send(request, self.adapter, user, response, frames, reply)
 
     async def pending(self, request):
         conn = self._connection(request)
@@ -163,15 +204,17 @@ class HttpApi:
             await self.adapter.registry.add(conn)
             await self.adapter._flush_outbox(conn)
             await _wait_for(conn.ws, lambda frames: any(_is_push(item) for item in frames), wait)
-        finally:
-            frames = await _finish(self.adapter, conn)
-        return web.json_response({'items': [item for item in frames if _is_push(item)]})
+        except asyncio.CancelledError:
+            _requeue(self.adapter, conn.identity.user, await _finish(self.adapter, conn))
+            raise
+        frames = await _finish(self.adapter, conn)
+        response = web.json_response({'items': [item for item in frames if _is_push(item)]})
+        return await _send(request, self.adapter, conn.identity.user, response, frames)
 
     async def approval(self, request):
         conn = self._connection(request)
         body = await self._body(request)
-        capabilities = body.get('capabilities')
-        conn.capabilities = capabilities if isinstance(capabilities, dict) else {}
+        conn.capabilities = _capabilities(body)
         try:
             await self.adapter.registry.add(conn)
             return await handle_approval(self.adapter, conn, body)
