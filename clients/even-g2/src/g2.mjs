@@ -76,6 +76,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       } else {
         chunks = []; recording = true;
         if (!await serial(() => bridge.audioControl(true))) { recording = false; fail(); return; }
+        if (!recording) { serial(() => bridge.audioControl(false)); return; }  // paused while the mic was opening
         show('listening', 'Listening…'); timer = setTimeout(tap, 8000);
       }
     } finally { micBusy = false; }
@@ -99,7 +100,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       });
       client.on('approval_closed', frame => dismiss(frame.id));
       client.on('error', fail); client.on('disconnected', fail);
-      client.on('connected', () => { if (!turn && !recording && !approval) show('answer', 'Tap to talk to Hermes'); });
+      client.on('connected', () => { if (!turn && !recording && !approval) { show('answer', 'Tap to talk to Hermes'); next(); } });
       await client.connect(); show('answer', 'Tap to talk to Hermes');
     },
     pause() {  // leaving the foreground: stop the mic, keep the app and its connection
