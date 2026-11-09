@@ -436,3 +436,34 @@ async def test_spoken_approval_uses_existing_path(server, monkeypatch, words, ch
     assert 'message' in answer and len(answer['message']) > 5
     assert calls == [('agent:main:glasses:dm:alice', choice, 'r1')]
     adapter.handle_message.assert_not_called()
+
+
+async def test_two_omitted_replies_stay_separate_items(server, monkeypatch):
+    adapter, client = server
+    await adapter.send('alice', 'P' * 900)
+
+    async def query(conn, frame):
+        await conn.send_json({'type': 'response', 'turn': frame['id'], 'text': frame['text'][:1] * 600, 'final': True})
+    monkeypatch.setattr(adapter, '_process_query', query)
+    assert await post(client, segment('Hermes, aaa', 1), segment('Hermes, bbb', 30)) == {'message': 'Hermes: ' + 'P' * 900}
+    second = await post(client)
+    third = await post(client)
+    assert sorted([second['message'], third['message']]) == ['Hermes: ' + 'a' * 600, 'Hermes: ' + 'b' * 600]
+    assert await post(client) == {}
+
+
+async def test_failed_write_queues_each_reply_once(server, monkeypatch):
+    adapter, client = server
+    await adapter.send('alice', 'P' * 900)
+    reply_with(adapter, 'R' * 300)
+
+    async def broken(self, request):
+        raise ConnectionResetError('client went away')
+    monkeypatch.setattr(http_api.web.Response, 'prepare', broken)
+    try:
+        await post(client, segment('Hermes, answer me'))
+    except Exception:
+        pass
+    monkeypatch.undo()
+    texts = [item[1] for item in adapter.outbox.drain('alice')]
+    assert sorted(texts) == ['P' * 900, 'R' * 300]

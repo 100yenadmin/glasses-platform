@@ -1,5 +1,8 @@
 """Omi's live transcript webhook, carried by the existing short-lived HTTP connection."""
+import hashlib
+import json
 import re
+import time
 from time import monotonic
 from uuid import uuid4
 
@@ -7,7 +10,7 @@ from aiohttp import web
 from gateway.platforms._shared import extra_or_secret
 
 from .devices import Connection, authenticate
-from .http_api import HttpSocket, _finish, _is_push, _reply, _requeue, _send, _terminal, _wait_for
+from .http_api import HttpSocket, _finish, _is_push, _requeue, _send, _terminal, _wait_for
 
 WAKE = re.compile(r"^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes(?!\s*['’]\s*s\b)\b[\W_]*", re.IGNORECASE)
 FOLLOWUP_SECONDS = 8
@@ -113,7 +116,6 @@ class OmiApi:
         conn.asking.update((turn_id, monotonic()) for turn_id, _ in turns)
         turn_ids = {turn_id for turn_id, _ in turns}
         reply = None
-        delivery_id = uuid4().hex
         try:
             await self.adapter.registry.add(conn)
             await self.adapter._flush_outbox(conn)
@@ -124,19 +126,22 @@ class OmiApi:
                 await _wait_for(conn.ws, lambda frames: all(
                     _terminal(frames, turn_id, start) is not None for turn_id in turn_ids), self.omi_wait)
             frames = await _finish(self.adapter, conn)
-            reply = '\n\n'.join(_reply(frames, turn_id) or '' for turn_id, _ in turns).strip()
+            self._keep_replies(conn, frames, turn_ids)
             response, shown = self._answer(frames, turn_ids)
-            omitted = '\n\n'.join(frame['text'] for frame in frames if frame.get('type') == 'response'
-                                 and frame.get('turn') in turn_ids and frame.get('text') and not shown(frame))
-            if omitted:
-                # _send requeues the full reply under this same id if the write fails.
-                self.adapter.outbox.append(identity.user, omitted, 'reply', f'reply-{delivery_id}')
         except BaseException:
-            frames = await _finish(self.adapter, conn)
-            reply = '\n\n'.join(_reply(frames, turn_id) or '' for turn_id, _ in turns).strip()
-            _requeue(self.adapter, conn, reply, delivery_id)
+            self._keep_replies(conn, await _finish(self.adapter, conn), turn_ids)
+            _requeue(self.adapter, conn)
             raise
-        return await _send(request, self.adapter, conn, response, shown, reply, delivery_id)
+        # Replies ride with the pushes: shown ones are delivered once written, each other one is queued on its own.
+        return await _send(request, self.adapter, conn, response, shown)
+
+    @staticmethod
+    def _keep_replies(conn, frames, turn_ids):
+        user = conn.identity.user
+        for frame in frames:
+            if frame.get('type') == 'response' and frame.get('turn') in turn_ids and frame.get('text'):
+                key = hashlib.sha256(json.dumps([user, frame['turn']]).encode()).hexdigest()[:32]
+                conn.sent_items.append(((time.time(), frame['text'], 'reply', f'reply-{key}'), frame))
 
 
 def register_routes(adapter, app):
