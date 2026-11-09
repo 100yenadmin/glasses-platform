@@ -677,3 +677,12 @@ async def test_interleaved_push_does_not_repeat_thinking_for_same_turn():
     await ws.send_json({'type': 'status', 'state': 'working'})
     assert len([f for f in real.frames if f['type'] == 'llm']) == 1
     await ws.close()
+
+
+@pytest.mark.parametrize('frame_ms,size,speech', [(60, 31, True), (60, 30, False), (20, 13, True), (20, 40, True),
+                                                  (20, 12, False)])
+def test_speech_detection_follows_the_frame_duration(frame_ms, size, speech):
+    from glasses_plugin.xiaozhi import Recording
+    recording = Recording({'sample_rate': 16000, 'channels': 1, 'frame_duration': frame_ms})
+    recording.add(b'x' * size)
+    assert recording.speech is speech

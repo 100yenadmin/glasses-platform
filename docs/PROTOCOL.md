@@ -257,7 +257,8 @@ v3 the 4-byte type/reserved/size header, with multibyte fields in network order.
 headers are ignored. The input parameters are retained for wrapping microphone packets in Ogg Opus.
 
 `listen start` collects packets; `listen stop` submits one v1 audio/ogg query, with an empty text and a fresh id.
-Only recordings containing a packet larger than 40 bytes are submitted. In `auto` / `realtime`, 800 ms of quiet
+Only recordings containing a speech-sized packet (over 12 bytes and over half a byte per millisecond of frame,
+for example over 30 bytes at 60 ms or 12 bytes at 20 ms) are submitted. In `auto` / `realtime`, 800 ms of quiet
 packets (at most 12 bytes each, after speech) also ends the recording. Recordings end at 15 seconds of wall or
 audio time, or at 240,000 bytes of Opus. Packets over 1500 bytes are ignored, and a WebSocket message over 64 KiB
 closes the connection. `listen detect`, MCP and unknown types are ignored. `abort`
