@@ -105,3 +105,13 @@ def test_register_adds_the_cli_command_when_hermes_supports_it():
                           register_cli_command=lambda name, help, setup, main, description='': seen.update(name=name))
     register(ctx)
     assert seen == {'name': 'glasses'}
+
+
+def test_revoking_the_last_device_never_brings_back_yaml_devices(home, capsys):
+    home('platforms:\n  glasses:\n    extra:\n      devices: "alice:old=tok-from-yaml"\n')
+    assert run('revoke', 'alice', 'old') == 1  # GLASSES_DEVICES would be empty, and YAML's list applies again
+    assert 'last device' in capsys.readouterr().out and env_file() == ''
+    run('pair', 'alice', 'new', '--no-qr')
+    assert run('revoke', 'alice', 'old') == 0
+    assert 'config.yaml still lists it' in capsys.readouterr().out
+    assert [i.device for i in stored().values()] == ['new']

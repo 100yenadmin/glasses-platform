@@ -119,6 +119,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
         self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
         self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
+        self._clarifying = set()  # users just asked a clarify question: their next query goes to Hermes as is
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -280,7 +281,9 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user
-        choice = spoken_choice(text) if self._approvals.get(user) else None
+        asked_clarify = user in self._clarifying  # the next words answer the agent's question, not an approval
+        self._clarifying.discard(user)
+        choice = spoken_choice(text) if self._approvals.get(user) and not asked_clarify else None
         if choice and await self._answer_approval(conn, frame.get('id'), choice):
             return
         turn_id = frame.get('id')
@@ -527,45 +530,64 @@ class GlassesAdapter(BasePlatformAdapter):
         await self._status(user, 'idle')
 
     async def _send_exec_approval_prompt(self, prompt):
-        """A dangerous-command approval, said the way a voice user can answer it: yes or no."""
+        """A dangerous-command approval, said the way a voice user can answer it: yes or no. Each one is tied to its
+        Hermes request id, so a spoken answer can only ever resolve that request."""
+        from tools.approval import list_gateway_approvals
         user = str(prompt.chat_id)
         if user not in {identity.user for identity in self._tokens.values()}:
             return SendResult(success=False, error='Unknown glasses user')
-        from gateway.platforms.base_exec_approval import approval_timeout_seconds
-        now, ttl = time.monotonic(), approval_timeout_seconds() + 60
-        pending = [a for a in self._approvals.get(user, []) if now - a.at < ttl]
-        pending.append(Approval(prompt.session_key, getattr(prompt, 'request_id', None), list(prompt.choices), now))  # no id before Hermes 0.23
-        self._approvals[user] = pending
+        request_id = getattr(prompt, 'request_id', None)
+        if not request_id:  # Hermes before 0.23 does not pass it: take the one new request in the session's queue
+            known = {a.request_id for a in self._approvals.get(user, [])}
+            new = [d.get('request_id') for d in list_gateway_approvals(prompt.session_key)
+                   if d.get('request_id') and d.get('request_id') not in known]
+            if len(new) != 1:
+                return SendResult(success=False, error='Approval request not identifiable')  # Hermes' text prompt
+            request_id = new[0]
+        self._approvals.setdefault(user, []).append(
+            Approval(prompt.session_key, request_id, list(prompt.choices), time.monotonic()))
         command = ' '.join(str(prompt.command).split())
         command = command if len(command) <= 90 else command[:87] + '...'
         reason = ' '.join(str(prompt.description or '').split()).rstrip('.')
+        reason = reason[:1].upper() + reason[1:]
         allow = 'Say yes to allow it once, or no to block it.' if 'once' in prompt.choices else 'Say no to block it.'
         text = f'Hermes wants to run: {command}.' + (f' {reason}.' if reason else '') + f' {allow} (Typed: /approve or /deny.)'
         return await self._push(user, text, 'approval', uuid4().hex)
 
+    def _live_approvals(self, user):
+        """This user's approvals that Hermes still waits for (not timed out, not answered by a typed /approve)."""
+        from tools.approval import list_gateway_approvals
+        live = [a for a in self._approvals.get(user, [])
+                if any(d.get('request_id') == a.request_id for d in list_gateway_approvals(a.session_key))]
+        if live:
+            self._approvals[user] = live
+        else:
+            self._approvals.pop(user, None)
+        return live
+
     async def _answer_approval(self, conn, query_id, choice):
-        """Resolve the oldest approval this user's devices were asked, with a spoken yes or no. False when none
-        is still waiting (answered elsewhere, timed out), so the words go to the agent instead."""
+        """Answer the one approval this user's devices are waiting on with a spoken yes or no. False when none is
+        waiting, or "yes" is not offered, so the words go to the agent instead. With two or more waiting, a bare
+        yes is ambiguous: nothing is resolved and the device is told how to answer."""
         from tools.approval import resolve_gateway_approval
         user = conn.identity.user
-        pending = self._approvals.get(user, [])
-        while pending:
-            approval = pending[0]
-            if choice not in approval.choices:
-                return False  # e.g. "yes" when only deny is offered: the agent hears it
-            if approval.request_id:
-                resolved = resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id)
-            else:
-                resolved = resolve_gateway_approval(approval.session_key, choice)
-            pending.pop(0)
-            if resolved:
-                if not pending:
-                    self._approvals.pop(user, None)
-                said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
-                await self._deliver_reply(user, conn, query_id, said)
-                return True
+        live = self._live_approvals(user)
+        if not live:
+            return False
+        if len(live) > 1:
+            await self._deliver_reply(user, conn, query_id, f'{len(live)} commands are waiting for approval, so I did '
+                                      'not act on that. Answer them with /approve or /deny.')
+            return True
+        approval = live[0]
+        if choice not in approval.choices:
+            return False  # e.g. "yes" when only deny is offered: the agent hears it
+        if not resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
+            self._live_approvals(user)
+            return False  # settled a moment ago
         self._approvals.pop(user, None)
-        return False
+        said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
+        await self._deliver_reply(user, conn, query_id, said)
+        return True
 
     async def send_slash_confirm(self, chat_id, title, message, session_key, confirm_id, metadata=None):
         # The device's new_session button is the user's explicit confirmation of the /new it sends; anything
@@ -606,6 +628,9 @@ class GlassesAdapter(BasePlatformAdapter):
         return await super().send_document(*args, metadata=_as_media(metadata), **kwargs)
 
     async def send_clarify(self, *args, metadata=None, **kwargs):
+        chat_id = args[0] if args else kwargs.get('chat_id')
+        if chat_id is not None:
+            self._clarifying.add(str(chat_id))
         return await super().send_clarify(*args, metadata={**(metadata or {}), 'glasses_prompt': 'clarify'}, **kwargs)
 
     async def _status(self, user, state, detail=None):

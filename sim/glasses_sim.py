@@ -127,6 +127,28 @@ async def run(url='ws://127.0.0.1:8765/voice', token='', legacy=False, device='s
                 return 3 if error.args[0] == 4401 else 2
 
 
+def _read_line(ask):
+    """A future for the next input line, read on a daemon thread so a closed socket never waits for Enter."""
+    import threading
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+
+    def read():
+        try:
+            result = ask('')
+        except BaseException as error:  # EOFError, KeyboardInterrupt
+            result = error
+        def deliver():
+            if not future.done():
+                (future.set_exception if isinstance(result, BaseException) else future.set_result)(result)
+        try:
+            loop.call_soon_threadsafe(deliver)
+        except RuntimeError:  # the loop is gone
+            pass
+    threading.Thread(target=read, daemon=True).start()
+    return future
+
+
 async def chat(url, token, device='terminal', photo=DEFAULT_PHOTO, emit=pretty_frame, ask=input):
     """Talk to the agent line by line as a pair of glasses with a camera. Pushes (reminders, cron results) print
     whenever they arrive. An empty line or end of input quits."""
@@ -163,6 +185,8 @@ async def chat(url, token, device='terminal', photo=DEFAULT_PHOTO, emit=pretty_f
                         await send(answer)
                     elif kind == 'response' and frame.get('final') and frame.get('turn') == turn:
                         answered.set()
+                    elif kind == 'push' and frame.get('origin') in ('approval', 'clarify'):
+                        answered.set()  # the turn waits for this answer: take the next line now
                     elif kind == 'error' and turn:
                         answered.set()
                 ready.set(); answered.set()  # the socket closed: wake whoever waits
@@ -174,7 +198,11 @@ async def chat(url, token, device='terminal', photo=DEFAULT_PHOTO, emit=pretty_f
                 if task.done():
                     return 3 if task.result() == 4401 else 2
                 while not task.done():
-                    text = (await asyncio.to_thread(ask, '')).strip()
+                    line = _read_line(ask)
+                    await asyncio.wait({line, task}, return_when=asyncio.FIRST_COMPLETED)
+                    if not line.done():
+                        break  # the gateway went away while we waited for a line
+                    text = line.result().strip()
                     if not text:
                         return 0
                     turn = uuid4().hex

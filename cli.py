@@ -27,6 +27,12 @@ def _setting(key, default=''):
     return default if value in (None, '') else value
 
 
+def _yaml_devices():
+    from hermes_cli.config import load_config
+    platform = ((load_config() or {}).get('platforms') or {}).get('glasses') or {}
+    return str((platform.get('extra') or {}).get('devices') or '')
+
+
 def _entries():
     """The configured device list as (user, device, token), in order. GLASSES_TOKEN is not part of it."""
     spec = str(_setting('devices') or '')
@@ -102,6 +108,9 @@ def pair(args):
     token = secrets.token_urlsafe(32)
     entries = [e for e in entries if e[:2] != (user, device)] + [(user, device, token)]
     _save(entries)
+    if token not in str(_setting('devices') or ''):  # Hermes refuses .env writes on some managed installs
+        print('Could not save the new device to the profile .env (see the message above). Nothing was paired.')
+        return 1
     url = connect_url(token, args.host, args.port, 'wss' if args.wss else 'ws')
     print(f'Paired {user}:{device}. It shares one conversation with every other device of {user}.\n')
     picture = None if args.no_qr else _qr(url)
@@ -136,8 +145,16 @@ def revoke(args):
     if len(kept) == len(entries):
         print(f'{args.user}:{args.device} is not in GLASSES_DEVICES.')
         return 1
+    if not kept and _yaml_devices().strip():
+        # An empty GLASSES_DEVICES counts as unset, so config.yaml's devices would apply again.
+        print(f'{args.user}:{args.device} is the last device, and config.yaml also lists devices '
+              '(platforms.glasses.extra.devices) that would apply again. Remove them there, then run this again.')
+        return 1
     _save(kept)
     print(f'Revoked {args.user}:{args.device}. Restart the gateway (`hermes gateway restart`) to disconnect it.')
+    yaml = parse_devices(_yaml_devices()) if _yaml_devices().strip() else {}
+    if any((i.user, i.device) == (args.user, args.device) for i in yaml.values()):
+        print('config.yaml still lists it; the .env list overrides it, but remove it there too.')
     return 0
 
 
