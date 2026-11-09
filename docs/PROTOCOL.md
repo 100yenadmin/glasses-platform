@@ -259,7 +259,8 @@ headers are ignored. The input parameters are retained for wrapping microphone p
 `listen start` collects packets; `listen stop` submits one v1 audio/ogg query, with an empty text and a fresh id.
 Only recordings containing a packet larger than 40 bytes are submitted. In `auto` / `realtime`, 800 ms of quiet
 packets (at most 12 bytes each, after speech) also ends the recording. Recordings end at 15 seconds of wall or
-audio time, or the configured frame-byte limit. `listen detect`, MCP and unknown types are ignored. `abort`
+audio time, or at 240,000 bytes of Opus. Packets over 1500 bytes are ignored, and a WebSocket message over 64 KiB
+closes the connection. `listen detect`, MCP and unknown types are ignored. `abort`
 cancels queued/current playback; it submits `/stop` only if this connection owns the active unanswered turn.
 
 The registered v1 connection declares `audio_out:["audio/mpeg"]`, speaker, mic and display. `transcript` becomes
@@ -268,8 +269,9 @@ spoken in order as `tts start`, `sentence_start` with text, binary Opus, `tts st
 is awaited for up to 20 seconds from enqueue; without it (or for errors), only the text events are sent.
 `ffmpeg` converts MPEG to 24 kHz mono / 60 ms Opus, paced at about 55 ms per packet; missing ffmpeg falls back to
 text events with one warning. `display` becomes a neutral Hermes `alert`; other adapter frames are dropped.
-Queued frames count as delivered to the adapter, but pushes whose TTS has not finished are requeued on close;
-there is no device playback acknowledgement, and a disconnect can repeat a partially heard push.
+A push counts as delivered once its `tts stop` has been sent; a push that was aborted or not finished when the
+device disconnects goes back to the queue for the next connect (or another device). The device itself sends no
+playback acknowledgement, so a disconnect can repeat a partially heard push.
 
 `sim/xiaozhi_sim.py --ota <private-OTA-URL> --wav sim/sample-voice.wav --out reply.ogg` exercises the device flow.
 It prints incoming JSON, uploads Opus in manual mode and saves reply packets as Ogg. `--text-only` listens and
