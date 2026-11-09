@@ -12,7 +12,7 @@ Enable Developer Mode in the Even phone app; run `npx evenhub qr --url http://<y
 For a desktop trial, run `npm run simulate` while Vite runs; no Even account is needed for the simulator.
 Open settings on the phone and save the gateway WebSocket URL (path `/voice`, no query) and device token.
 They stay in Even bridge local storage; tokens are never compiled into the app or logged.
-Dev builds only accept `?url=<encoded-websocket-url>&token=<encoded-token>&say=<encoded-text>`;
+Dev builds only accept `?server=<encoded-websocket-url>&token=<encoded-token>&say=<encoded-text>`;
 `say` sends one text turn after connecting. Use a disposable fixture token for simulator URLs; do not share that URL.
 State logs are only `[hermes] listening|thinking|answer|push|approval|error`.
 

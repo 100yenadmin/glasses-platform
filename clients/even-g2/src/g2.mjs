@@ -1,4 +1,5 @@
 import {HermesGlassesClient} from '../../js/hermes-glasses.js';
+export const LENS_CHARS = 400;
 export function label63(value) {
   let out = '';
   for (const char of String(value)) { if (new TextEncoder().encode(out + char).length > 63) break; out += char; }
@@ -12,7 +13,8 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   const serial = fn => (queue = queue.then(fn).catch(() => { fail(); }));
   function show(kind, text) {
     if (closed) return;
-    content = String(text).slice(-240);
+    // The lens fits about 9 lines of 50 characters: keep the start of a long answer, not its end.
+    content = String(text).length > LENS_CHARS ? String(text).slice(0, LENS_CHARS - 1) + '…' : String(text);
     if (kind !== state) { state = kind; console.log(`[hermes] ${kind}`); }
     mirror(kind, content);
     if (renderTimer) return;
@@ -85,7 +87,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     async connect(url, token) {
       client?.disconnect();
       client = new HermesGlassesClient({url, token, WebSocketImpl, device: {name: 'Even G2', model: 'G2',
-        capabilities: {display: true, display_chars: 240, buttons: true, mic: true}}, app: {name: 'Hermes Glasses', version: '0.1.0'}});
+        capabilities: {display: true, display_chars: LENS_CHARS, buttons: true, mic: true}}, app: {name: 'Hermes Glasses', version: '0.1.0'}});
       client.on('transcript', frame => { transcript = frame.text; });
       client.on('delta', frame => { answer = frame.text; show('answer', `${transcript}\n${answer}`); });
       client.on('push', frame => { pushes.push(frame); if (!turn && !recording && !approval) next(); });

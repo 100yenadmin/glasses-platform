@@ -20,7 +20,7 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   const connected = app.connect('ws://fixture/voice', 'PRIVATE_FIXTURE_TOKEN');
   const socket = Socket.last;
   socket.frame({type: 'welcome'}); socket.frame({type: 'hello_ack'}); await connected;
-  assert.deepEqual(socket.sent[0].device.capabilities, {display: true, display_chars: 240, buttons: true, mic: true});
+  assert.deepEqual(socket.sent[0].device.capabilities, {display: true, display_chars: 400, buttons: true, mic: true});
   await app.tap(); app.pcm(new Uint8Array([1, 2, 3, 4])); await app.tap();
   assert.deepEqual(mic, [true, false]);
   const query = socket.sent.at(-1);
@@ -30,6 +30,10 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   socket.frame({type: 'response_delta', turn: query.id, text: 'Hi there'});
   assert.equal(views.at(-1)[1], 'Hello\nHi there');
   t.mock.timers.tick(120); await flush(); assert.equal(writes.at(-1).content, 'Hello\nHi there');
+  const longAnswer = 'Start ' + 'x'.repeat(500);
+  socket.frame({type: 'response_delta', turn: query.id, text: longAnswer});
+  assert.equal(views.at(-1)[1].length, 400);
+  assert.ok(views.at(-1)[1].startsWith('Hello\nStart ') && views.at(-1)[1].endsWith('…'));
   socket.frame({type: 'push', origin: 'cron', text: 'Stretch'});
   assert.equal(views.at(-1)[0], 'answer');
   socket.frame({type: 'response', turn: query.id, text: 'Final'}); await flush();

@@ -31,7 +31,7 @@ const app = createG2(bridge, transcript, (state: string, text: string) => {
   setStatus(state, state); setTranscript(text, '')
 })
 const dev = import.meta.env.DEV ? new URLSearchParams(location.search) : new URLSearchParams()
-const url = dev.get('url') ?? await bridge.getLocalStorage('hermes-url')
+const url = dev.get('server') ?? await bridge.getLocalStorage('hermes-url')
 const token = dev.get('token') ?? await bridge.getLocalStorage('hermes-token')
 async function connect(url: string, token: string) {
   try {
