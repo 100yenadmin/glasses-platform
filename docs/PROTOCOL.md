@@ -206,14 +206,17 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   clarify question), it answers early with `"status":"needs_answer"` and the prompt in `"prompts"`; answer it with
   another `POST /turn` (for example `{"text":"yes"}`) or with `POST /approval`. If the turn is still running after
   `turn_timeout` seconds (default 50), it answers `202` with `"status":"pending"`, and the reply arrives later
-  through `/pending`. With `Accept: text/plain` the body is just the reply text, for Shortcuts.
+  through `/pending`. With `Accept: text/plain` the body is just the reply text (or the prompts), for Shortcuts;
+  pushes it does not show stay queued for `/pending`. A request has no camera, display or haptics: those
+  capabilities are ignored here.
 - `GET /pending?wait=25` waits up to `wait` seconds (at most 55) for pushes and answers
   `{"items":[<push frames>]}` as soon as there is at least one, or an empty list at the deadline. Pushes are
   removed from the queue once they are in an answer.
 - `POST /approval` with `{"id","choice"}` answers like `approval_response` and returns the `approval_result`.
 - Each request is its own short-lived connection: it never replaces the device's WebSocket or another open request.
   While it is open the device counts as connected, so pushes for it go into that request's answer instead of the
-  queue. If the answer cannot be written (the client went away), its pushes and the turn's reply go back to the
+  queue. They count as delivered only once the answer has been written, so a gateway restart during the wait
+  keeps them. If the answer cannot be written (the client went away), its pushes and the turn's reply go back to the
   queue. A request that has already answered never loses a push: anything that arrives later waits in the
   queue for the next request.
 - A push can arrive twice (in an open `/turn` and an open `/pending` of the same device, or again after an answer

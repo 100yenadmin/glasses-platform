@@ -6,6 +6,7 @@ from uuid import uuid4
 from aiohttp import web
 from gateway.platforms._shared import extra_or_secret
 
+from . import audio
 from .devices import Connection, authenticate
 
 AUDIO_TIMEOUT = 15
@@ -36,6 +37,8 @@ def _capabilities(body):
     capabilities = dict(capabilities) if isinstance(capabilities, dict) else {}
     capabilities.pop('camera', None)  # a request cannot answer capture_photo
     capabilities.pop('ack', None)  # the HTTP answer itself is the delivery
+    for action in ('display', 'haptics'):  # the answer carries no display or haptic frames
+        capabilities.pop(action, None)
     return capabilities
 
 
@@ -88,17 +91,29 @@ def _reply(frames, turn_id):
                  if frame.get('type') == 'response' and frame.get('turn') == turn_id), None)
 
 
-def _requeue(adapter, conn, reply=None, turn_id=None):
-    """The answer never reached the device: queue again every push written to this request (the original items,
-    with their ids and times) and the turn's reply. Repeating the same id is harmless: the queue keeps one copy."""
-    items = list(conn.sent_items)
+def _requeue(adapter, conn, reply=None, turn_id=None, shown=None):
+    """Queue again every push written to this request that the device did not get (the original items, with their
+    ids and times), and the turn's reply if the answer was lost. `shown` picks the frames the written answer carried:
+    those are delivered. Repeating the same id is harmless: the queue keeps one copy."""
+    user = conn.identity.user
+    delivered = adapter._delivered.get(user, ())  # another device already got these
+    items, done = [], []
+    for item, frame in conn.sent_items:
+        if shown is not None and shown(frame):
+            adapter._mark_delivered(user, item[3])
+        elif item[3] in delivered:
+            done.append(item[3])
+        else:
+            items.append(item)
+    adapter.outbox.forget(done)
     if reply:
         items.append((time.time(), reply, 'reply', f'reply-{turn_id}'))
-    adapter.outbox.merge(conn.identity.user, items)
+    adapter.outbox.merge(user, items)
 
 
-async def _send(request, adapter, conn, response, reply=None, turn_id=None):
-    """Write the answer now, so a client that went away is noticed and nothing it was sent is lost."""
+async def _send(request, adapter, conn, response, shown, reply=None, turn_id=None):
+    """Write the answer now, so a client that went away is noticed and nothing it was sent is lost. Pushes count as
+    delivered only once the answer is written, and only those it shows."""
     transport = request.transport
     try:
         if transport is None or transport.is_closing():
@@ -109,6 +124,8 @@ async def _send(request, adapter, conn, response, reply=None, turn_id=None):
         _requeue(adapter, conn, reply, turn_id)
         if isinstance(exc, asyncio.CancelledError):
             raise
+    else:
+        _requeue(adapter, conn, shown=shown)
     return response
 
 
@@ -166,16 +183,17 @@ class HttpApi:
             self.adapter._spawn(self.adapter._process_query(conn, frame))
             await _wait_for(conn.ws, lambda frames: _terminal(frames, turn_id, start) is not None, self.turn_timeout)
             terminal = _terminal(conn.ws.frames, turn_id, start)
-            if terminal is not None and not _is_prompt(terminal) and conn.capabilities.get('audio_out'):
+            speaks = body.get('speak') is not False and audio.output_mimes(conn.capabilities)
+            if speaks and terminal is not None and terminal.get('type') == 'response':
                 await _wait_for(conn.ws, lambda frames: any(
                     item.get('type') == 'audio' and item.get('ref') == turn_id for item in frames), AUDIO_TIMEOUT)
             frames = await _finish(self.adapter, conn)
-            response, reply = self._turn_answer(request, frames, turn_id, start)
+            response, reply, shown = self._turn_answer(request, frames, turn_id, start)
         except BaseException:
             frames = await _finish(self.adapter, conn)
             _requeue(self.adapter, conn, _reply(frames, turn_id), turn_id)
             raise
-        return await _send(request, self.adapter, conn, response, reply, turn_id)
+        return await _send(request, self.adapter, conn, response, shown, reply, turn_id)
 
     def _turn_answer(self, request, frames, turn_id, start):
         terminal = _terminal(frames, turn_id, start)
@@ -199,9 +217,11 @@ class HttpApi:
         status = 202 if result['status'] == 'pending' else 200
         reply = result.get('text') if result['status'] == 'done' and terminal.get('type') == 'response' else None
         if 'text/plain' in request.headers.get('Accept', '').lower():
+            # Only the prompts are in a plain-text body: every other push stays queued for /pending.
             text = '\n'.join(str(item.get('text', '')) for item in prompts) if prompts else result.get('text', '')
-            return web.Response(text=text, status=status, content_type='text/plain'), reply
-        return web.json_response(result, status=status), reply
+            return (web.Response(text=text, status=status, content_type='text/plain'), reply,
+                    lambda frame: frame in prompts)
+        return web.json_response(result, status=status), reply, lambda frame: True
 
     async def pending(self, request):
         conn = self._connection(request)
@@ -222,7 +242,7 @@ class HttpApi:
             await _finish(self.adapter, conn)
             _requeue(self.adapter, conn)
             raise
-        return await _send(request, self.adapter, conn, response)
+        return await _send(request, self.adapter, conn, response, lambda frame: True)
 
     async def approval(self, request):
         # Not registered as a live device: it only carries this one answer, so no push can land in it and be lost.

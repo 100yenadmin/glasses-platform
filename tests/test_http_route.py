@@ -524,3 +524,71 @@ async def test_an_unexpected_error_still_closes_the_request_and_requeues(server,
         pass
     assert not adapter.registry.live('alice')
     assert 'queued reminder' in [item[1] for item in adapter.outbox.drain('alice')]
+
+
+async def test_plain_text_answer_keeps_pushes_it_does_not_show_queued(server):
+    adapter, client = server
+    await adapter.send('alice', 'unseen reminder', metadata={'origin': 'cron'})
+    reply_with(adapter)
+    response = await client.post('/turn', headers={**AUTH, 'Accept': 'text/plain'}, json={'text': 'Hello'})
+    assert await response.text() == 'Hello back.'
+    assert [item[1] for item in adapter.outbox.drain('alice')] == ['unseen reminder']
+
+
+async def test_json_answer_delivers_its_pushes(server):
+    adapter, client = server
+    await adapter.send('alice', 'seen reminder', metadata={'origin': 'cron'})
+    reply_with(adapter)
+    result = await (await client.post('/turn', headers=AUTH, json={'text': 'Hello'})).json()
+    assert [item['text'] for item in result['pushes']] == ['seen reminder']
+    assert adapter.outbox.drain('alice') == [] and not adapter.outbox._inflight
+
+
+async def test_pushes_in_an_open_request_stay_in_the_outbox_file_until_answered(server, monkeypatch):
+    adapter, client = server
+    await adapter.send('alice', 'kept reminder', metadata={'origin': 'cron'})
+    asked, release = asyncio.Event(), asyncio.Event()
+
+    async def query(conn, frame):
+        asked.set()
+        await release.wait()
+        await conn.send_json({'type': 'response', 'turn': 'slow', 'text': 'Done.'})
+    monkeypatch.setattr(adapter, '_process_query', query)
+    request = asyncio.create_task(client.post('/turn', headers=AUTH, json={'text': 'Hello', 'id': 'slow'}))
+    await asyncio.wait_for(asked.wait(), 2)
+    # A crash now must not lose the reminder: it is still in what the outbox saves.
+    assert [item[1] for _, item in adapter.outbox._inflight.values()] == ['kept reminder']
+    release.set()
+    await asyncio.wait_for(request, 2)
+    assert not adapter.outbox._inflight
+
+
+@pytest.mark.parametrize('capability', ['display', 'haptics'])
+async def test_device_actions_skip_http_requests(server, monkeypatch, capability):
+    adapter, client = server
+    connections = watch_connections(adapter, monkeypatch)
+    reply_with(adapter)
+    await client.post('/turn', headers=AUTH, json={'text': 'Hello', 'capabilities': {capability: True}})
+    conn = await asyncio.wait_for(connections.get(), 2)
+    assert capability not in conn.capabilities
+
+
+@pytest.mark.parametrize('body', [{'speak': False}, {}])
+async def test_no_audio_wait_without_speech(server, monkeypatch, body):
+    adapter, client = server
+    waits = []
+    wait_for = http_api._wait_for
+
+    async def wait(socket, ready, seconds):
+        waits.append(seconds)
+        await wait_for(socket, ready, seconds)
+    monkeypatch.setattr(http_api, '_wait_for', wait)
+    if body:  # speech switched off for this turn
+        reply_with(adapter)
+    else:  # an error ends the turn: nothing is spoken
+        async def query(conn, frame):
+            await conn.send_json({'type': 'error', 'message': 'Could not hear.'})
+        monkeypatch.setattr(adapter, '_process_query', query)
+    await client.post('/turn', headers=AUTH,
+                      json={'text': 'Hello', **body, 'capabilities': {'audio_out': ['audio/mpeg']}})
+    assert waits == [50]
