@@ -86,8 +86,6 @@ def _as_media(metadata):
     return {**(metadata or {}), 'glasses_media': True}
 
 
-# Hermes wraps cron deliveries in a header (job name and id) and a footer (how to stop the job). Read aloud on
-# glasses that is noise: the wearer hears the job's own words, and the push frame says it came from cron.
 _HERMES_ID = re.compile(r'(.+)~g[0-9a-f]{8}', re.DOTALL)
 
 
@@ -103,6 +101,8 @@ def _wire_id(value):
     return match.group(1) if match else value
 
 
+# Hermes wraps cron deliveries in a header (job name and id) and a footer (how to stop the job). Read aloud on
+# glasses that is noise: the wearer hears the job's own words, and the push frame says it came from cron.
 _CRON_WRAPPER = re.compile(
     r'\ACronjob Response: (?P<name>[^\n]*)\n\(job_id: [^)\n]*\)\n-+\n\n(?:(?P<body>.*)\n\n)?'
     r'To stop or manage this job, send me a new message [^\n]*\Z', re.S)
