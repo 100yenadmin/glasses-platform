@@ -475,3 +475,52 @@ async def test_finish_releases_pending_and_held_pushes(server):
     assert conn.ws.closed and not adapter.registry.live('alice')
     assert conn.pending == conn.held == []
     assert [item[1] for item in adapter.outbox.drain('alice')] == ['pending', 'held']
+
+
+async def test_a_button_prompt_that_cannot_be_delivered_goes_back_to_the_queue(server, monkeypatch):
+    adapter, client = server
+
+    async def query(conn, frame):  # the turn asks for an approval: a buttons request gets the card
+        import time
+        item = (time.time(), 'Allow rm?', 'approval', 'push-1')
+        await adapter._write_push(conn, item, {'type': 'approval_request', 'id': 'r1', 'text': 'Allow rm?',
+                                               'command': 'rm', 'description': '', 'choices': ['once', 'deny']})
+    monkeypatch.setattr(adapter, '_process_query', query)
+
+    async def broken(self, request):
+        raise ConnectionResetError('client went away')
+    monkeypatch.setattr(http_api.web.Response, 'prepare', broken)
+    try:
+        await client.post('/turn', headers=AUTH, json={'text': 'Delete it', 'capabilities': {'buttons': True}})
+    except Exception:
+        pass
+    monkeypatch.undo()
+    assert [(i[1], i[2], i[3]) for i in adapter.outbox.drain('alice')] == [('Allow rm?', 'approval', 'push-1')]
+
+
+async def test_approval_route_is_not_a_live_device(server, monkeypatch):
+    adapter, client = server
+    seen = []
+
+    async def button(conn, frame):
+        seen.append(conn in adapter.registry.live('alice'))
+        await conn.send_json({'type': 'approval_result', 'id': frame['id'], 'ok': False, 'message': 'Unknown approval.'})
+    monkeypatch.setattr(adapter, '_button_approval', button)
+    await client.post('/approval', headers=AUTH, json={'id': 'r1', 'choice': 'once'})
+    assert seen == [False]
+
+
+async def test_an_unexpected_error_still_closes_the_request_and_requeues(server, monkeypatch):
+    adapter, client = server
+    await adapter.send('alice', 'queued reminder', metadata={'origin': 'cron'})
+
+    def boom(*args, **kwargs):
+        raise KeyError('broken answer')
+    monkeypatch.setattr(api_for(adapter), '_turn_answer', boom)
+    reply_with(adapter)
+    try:
+        await client.post('/turn', headers=AUTH, json={'text': 'Hello'})
+    except Exception:
+        pass
+    assert not adapter.registry.live('alice')
+    assert 'queued reminder' in [item[1] for item in adapter.outbox.drain('alice')]

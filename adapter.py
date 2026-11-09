@@ -436,6 +436,8 @@ class GlassesAdapter(BasePlatformAdapter):
         if not await conn.send_json(frame):
             return False
         user = conn.identity.user
+        if conn.slot:  # an HTTP answer: kept so the push can be queued again if the answer never arrives
+            conn.sent_items.append(item)
         if frame['type'] == 'push' and conn.capabilities.get('ack') is True:
             if message_id not in self._delivered.get(user, ()):
                 conn.unacked[message_id] = item

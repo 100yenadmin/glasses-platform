@@ -216,6 +216,8 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   queue. If the answer cannot be written (the client went away), its pushes and the turn's reply go back to the
   queue. A request that has already answered never loses a push: anything that arrives later waits in the
   queue for the next request.
+- A push can arrive twice (in an open `/turn` and an open `/pending` of the same device, or again after an answer
+  that could not be written): drop repeats by `id`.
 - Status codes: `401` bad or missing token, `400` malformed body, `413` too large, `202` still running.
 
 ## Limits

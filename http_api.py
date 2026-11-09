@@ -73,26 +73,31 @@ async def _wait_for(socket, ready, seconds):
 
 
 async def _finish(adapter, conn):
-    # _push holds this same lock: each push lands in this snapshot or the outbox.
-    async with adapter._lock(conn.identity.user):
-        await conn.ws.close()
-        adapter.registry.remove(conn)
-        frames = list(conn.ws.frames)
-    adapter._release(conn)
-    return frames
+    """Close the request's connection once. _push holds this same lock, so each push is either in the snapshot or
+    queued for the next request."""
+    if not conn.ws.closed or adapter.registry.by_user.get(conn.identity.user, {}).get(conn.slot) is conn:
+        async with adapter._lock(conn.identity.user):
+            await conn.ws.close()
+            adapter.registry.remove(conn)
+        adapter._release(conn)
+    return list(conn.ws.frames)
 
 
-def _requeue(adapter, user, frames, reply=None):
-    """The answer never reached the device: put its pushes (and the turn's reply) back in the queue, with their ids."""
-    now = time.time()
-    items = [(now, item.get('text', ''), item.get('origin', 'message'), item['id'])
-             for item in frames if item.get('type') == 'push' and item.get('id')]
+def _reply(frames, turn_id):
+    return next((frame.get('text') for frame in frames
+                 if frame.get('type') == 'response' and frame.get('turn') == turn_id), None)
+
+
+def _requeue(adapter, conn, reply=None, turn_id=None):
+    """The answer never reached the device: queue again every push written to this request (the original items,
+    with their ids and times) and the turn's reply. Repeating the same id is harmless: the queue keeps one copy."""
+    items = list(conn.sent_items)
     if reply:
-        items.append((now, reply, 'reply', uuid4().hex))
-    adapter.outbox.merge(user, items)
+        items.append((time.time(), reply, 'reply', f'reply-{turn_id}'))
+    adapter.outbox.merge(conn.identity.user, items)
 
 
-async def _send(request, adapter, user, response, frames, reply=None):
+async def _send(request, adapter, conn, response, reply=None, turn_id=None):
     """Write the answer now, so a client that went away is noticed and nothing it was sent is lost."""
     transport = request.transport
     try:
@@ -101,7 +106,7 @@ async def _send(request, adapter, user, response, frames, reply=None):
         await response.prepare(request)
         await response.write_eof()
     except (ConnectionError, RuntimeError, asyncio.CancelledError) as exc:
-        _requeue(adapter, user, frames, reply)
+        _requeue(adapter, conn, reply, turn_id)
         if isinstance(exc, asyncio.CancelledError):
             raise
     return response
@@ -153,7 +158,7 @@ class HttpApi:
         frame = {key: body[key] for key in ('text', 'audio', 'image', 'speak') if key in body}
         frame.update(type='query', id=turn_id)
         conn.asking[turn_id] = time.monotonic()
-        user, start, frames = conn.identity.user, 0, []
+        start = 0
         try:
             await self.adapter.registry.add(conn)
             await self.adapter._flush_outbox(conn)
@@ -164,11 +169,15 @@ class HttpApi:
             if terminal is not None and not _is_prompt(terminal) and conn.capabilities.get('audio_out'):
                 await _wait_for(conn.ws, lambda frames: any(
                     item.get('type') == 'audio' and item.get('ref') == turn_id for item in frames), AUDIO_TIMEOUT)
-        except asyncio.CancelledError:
             frames = await _finish(self.adapter, conn)
-            _requeue(self.adapter, user, frames)
+            response, reply = self._turn_answer(request, frames, turn_id, start)
+        except BaseException:
+            frames = await _finish(self.adapter, conn)
+            _requeue(self.adapter, conn, _reply(frames, turn_id), turn_id)
             raise
-        frames = await _finish(self.adapter, conn)
+        return await _send(request, self.adapter, conn, response, reply, turn_id)
+
+    def _turn_answer(self, request, frames, turn_id, start):
         terminal = _terminal(frames, turn_id, start)
         result = {'id': turn_id, 'status': 'pending', 'pushes': []}
         prompts = []
@@ -185,16 +194,14 @@ class HttpApi:
                 audio = next((item for item in frames if item.get('type') == 'audio'
                               and item.get('ref') == turn_id), None)
                 if audio is not None:
-                    result['audio'] = {key: audio[key] for key in ('data', 'mime')}
+                    result['audio'] = {'data': audio.get('data'), 'mime': audio.get('mime')}
         result['pushes'] = [item for item in frames if _is_push(item) and item not in prompts]
         status = 202 if result['status'] == 'pending' else 200
         reply = result.get('text') if result['status'] == 'done' and terminal.get('type') == 'response' else None
         if 'text/plain' in request.headers.get('Accept', '').lower():
             text = '\n'.join(str(item.get('text', '')) for item in prompts) if prompts else result.get('text', '')
-            response = web.Response(text=text, status=status, content_type='text/plain')
-        else:
-            response = web.json_response(result, status=status)
-        return await _send(request, self.adapter, user, response, frames, reply)
+            return web.Response(text=text, status=status, content_type='text/plain'), reply
+        return web.json_response(result, status=status), reply
 
     async def pending(self, request):
         conn = self._connection(request)
@@ -209,22 +216,20 @@ class HttpApi:
             await self.adapter.registry.add(conn)
             await self.adapter._flush_outbox(conn)
             await _wait_for(conn.ws, lambda frames: any(_is_push(item) for item in frames), wait)
-        except asyncio.CancelledError:
-            _requeue(self.adapter, conn.identity.user, await _finish(self.adapter, conn))
+            frames = await _finish(self.adapter, conn)
+            response = web.json_response({'items': [item for item in frames if _is_push(item)]})
+        except BaseException:
+            await _finish(self.adapter, conn)
+            _requeue(self.adapter, conn)
             raise
-        frames = await _finish(self.adapter, conn)
-        response = web.json_response({'items': [item for item in frames if _is_push(item)]})
-        return await _send(request, self.adapter, conn.identity.user, response, frames)
+        return await _send(request, self.adapter, conn, response)
 
     async def approval(self, request):
+        # Not registered as a live device: it only carries this one answer, so no push can land in it and be lost.
         conn = self._connection(request)
         body = await self._body(request)
         conn.capabilities = _capabilities(body)
-        try:
-            await self.adapter.registry.add(conn)
-            return await handle_approval(self.adapter, conn, body)
-        finally:
-            await _finish(self.adapter, conn)
+        return await handle_approval(self.adapter, conn, body)
 
 
 def register_routes(adapter, app):

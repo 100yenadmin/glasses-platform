@@ -64,6 +64,7 @@ class Connection:
     flush_task: object = None
     unacked: dict = field(default_factory=dict)  # push id -> item, retained until any device delivers it
     slot: str = ''  # registry key for a short-lived HTTP connection, so it never replaces the device's socket
+    sent_items: list = field(default_factory=list)  # queue items written to a short-lived HTTP connection
 
     async def send_json(self, frame):
         async with self.send_lock:
