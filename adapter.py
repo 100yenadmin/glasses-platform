@@ -358,11 +358,11 @@ class GlassesAdapter(BasePlatformAdapter):
                     raise ValueError('Empty transcript')
                 await conn.send_json(protocol.transcript(frame.get('id'), text))
             except Exception:
-                await conn.send_json(protocol.error("I couldn't hear that."))
+                await conn.send_json(protocol.error("I couldn't hear that.", frame.get('id') if conn.protocol == 1 else None))
                 await self._answered(conn, frame.get('id'))
                 return
         if not text:
-            await conn.send_json(protocol.error('Empty query.'))
+            await conn.send_json(protocol.error('Empty query.', frame.get('id') if conn.protocol == 1 else None))
             await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user

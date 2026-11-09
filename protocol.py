@@ -99,5 +99,6 @@ def pong():
     return {'type': 'pong'}
 
 
-def error(message):
-    return {'type': 'error', 'message': message}
+def error(message, turn=None):
+    """v0 frames stay exactly `{type, message}`; a v1 error that answers one query names it (`turn`)."""
+    return {'type': 'error', 'message': message, **({'turn': turn} if turn else {})}
