@@ -90,7 +90,8 @@ rates. Simulator runs prove the server side only.
 - **M6 — ESP32 voice boxes:** a xiaozhi-compatible endpoint (its WebSocket hello, Opus audio, abort), covering the
   138+ boards of the open-source xiaozhi firmware. Needs M1 voice in and out.
 - **M7 — Even Realities G2:** an Even Hub web app on our protocol (glasses mic, display, touchpad and ring for
-  approvals, pushes). Beta testers need no store review.
+  approvals, pushes). Beta testers need no store review. Client implemented in `clients/even-g2/`;
+  simulator acceptance pending orchestrator proof; real-glasses session remains open ([#24](https://github.com/100yenadmin/glasses-platform/issues/24)).
 - **M8 — Omi pendant:** an Omi app that receives live transcripts by webhook and feeds the user's session.
 - **M9 — Android: Wear OS and Android Auto:** one Android reference client; Android Auto shows its messages.
 - **M10 — Pebble** ([#27](https://github.com/100yenadmin/glasses-platform/issues/27)): Bobby-compatible query and
