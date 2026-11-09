@@ -204,3 +204,27 @@ async def test_startup_replay_restores_route_and_notify_marks_final(server):
     assert final['turn'] == 'replayed' and final['text'] == 'final'
     assert adapter.config.home_channel.chat_id == 'alice'
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_reused_query_id_gets_a_fresh_hermes_id_and_its_own_reply(server):
+    # Hermes refuses an old message id with new text, so a device that restarts at q1 must still be answered.
+    adapter, client = server
+    seen = []
+
+    async def reply(event):
+        seen.append(event.message_id)
+        await adapter.on_processing_start(event)
+        await adapter.send(event.source.chat_id, 'Answer: ' + event.text, reply_to=event.message_id,
+                           metadata={'notify': True, 'reply_to_message_id': event.message_id})
+        await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+
+    adapter.handle_message = AsyncMock(side_effect=reply)
+    for text in ('first', 'second'):
+        ws = await opened(client)
+        await ws.send_json({'type': 'query', 'id': 'q1', 'text': text})
+        frame = await until(ws, 'response')
+        assert (frame['turn'], frame['text'], frame['final']) == ('q1', 'Answer: ' + text, True)
+        await ws.close()
+    assert len(set(seen)) == 2 and all(value.startswith('q1~g') for value in seen)
+    assert 'alice' not in adapter._active_turn

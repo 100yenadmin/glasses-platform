@@ -14,6 +14,9 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
   `hermes glasses pair me voicebox --xiaozhi` and the device's OTA address: push to talk with Opus audio, spoken
   answers, abort, and reminders played the next time the device connects. See
   [ESP32 voice boxes](README.md#esp32-voice-boxes-xiaozhi).
+- **Reused query ids are answered.** Hermes refuses an old message id that arrives with new text, so a device that
+  restarted its id counter (`q1`, `q2`, …) used to wait forever. Each query now reaches Hermes under a fresh id;
+  devices still see their own ids on every reply.
 
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
