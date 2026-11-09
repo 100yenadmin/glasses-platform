@@ -208,7 +208,8 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   `turn_timeout` seconds (default 50), it answers `202` with `"status":"pending"`, and the reply arrives later
   through `/pending`. With `Accept: text/plain` the body is just the reply text (or the prompts), for Shortcuts;
   pushes it does not show stay queued for `/pending`. A request has no camera, display or haptics: those
-  capabilities are ignored here.
+  capabilities are ignored here. With `audio_out`, a JSON answer carries audio for the turn's reply only, never for
+  pushes.
 - `GET /pending?wait=25` waits up to `wait` seconds (at most 55) for pushes and answers
   `{"items":[<push frames>]}` as soon as there is at least one, or an empty list at the deadline. Pushes are
   removed from the queue once they are in an answer.
@@ -222,6 +223,44 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
 - A push can arrive twice (in an open `/turn` and an open `/pending` of the same device, or again after an answer
   that could not be written): drop repeats by `id`.
 - Status codes: `401` bad or missing token, `400` malformed body, `413` too large, `202` still running.
+
+## Omi webhook
+
+Set Omi's **Real-Time Transcript Webhook** to `https://<public-host>/omi/<device-token>/transcript`.
+Omi's backend must reach it over the internet (an HTTPS reverse proxy or Tailscale Funnel); local network
+access alone is insufficient. See [setup](../README.md#omi-pendant). The plugin makes no outbound Omi calls.
+
+- Omi calls `POST /omi/{token}/transcript?session_id=<id>&uid=<omi-user-id>` repeatedly during a live
+  conversation. The path token uses the same authentication as the WebSocket and decides the Hermes user
+  and device. `uid` is ignored; `session_id` only groups transcript segments for that authenticated device.
+- The body is a JSON **array**, for example
+  `[{"text":"Hey Hermes, what time is it","speaker":"SPEAKER_00","speakerId":0,"is_user":true,"start":0,"end":2}]`.
+  Malformed JSON or segments get `400`, a bad token gets `401`, and the listener's body limit still applies (`413`).
+- A segment starting with “hey hermes” or “hermes” starts a question, ignoring case, leading punctuation and a
+  leading “ok” or “okay”. The wake word must be followed by a comma, the end of the segment, or a space
+  whose following text does not start with `'s` or `’s`; “Hermes's docs are great” does not wake it.
+  The following words become the query. A wake phrase alone arms an eight-second
+  window for subsequent segments in that session; eligible segments in the completing call are joined.
+  A call with any `is_user:true` segments uses only those segments; otherwise all speakers count, so anyone
+  nearby can answer an approval. Repeated segments with the same start time and text are ignored within
+  that device's session, retaining the newest 256 keys. After ten minutes without a call, session state
+  expires (pruned on the next call). Each device identity keeps at most 32 sessions, evicting the least
+  recently used.
+- Each question is an ordinary v1 query on a short-lived connection with capabilities `{}`. The webhook
+  waits up to `omi_wait` seconds (`GLASSES_OMI_WAIT`, default 20) for its reply or an approval/clarify prompt.
+  It always answers a valid call with `200`: `{"message":"<text>"}` when there is text, otherwise `{}`.
+  Every non-empty message starts with `Hermes: ` so it exceeds Omi's five-character display threshold.
+  A late reply becomes a queued
+  push for a later call. Approval prompts use the existing spoken path: “Hey Hermes, yes” or “Hey Hermes, no”.
+- Every call, including an empty array or one without a wake phrase, flushes this user's queued pushes.
+  Pushes and replies are joined in arrival order (oldest first), separated by blank lines, with a total limit
+  of 1000 characters including the prefix. An item exceeding the remaining room keeps its head and ends
+  with `…`; it counts as shown and is acknowledged after a successful write. Items with no room stay queued
+  for the next call. Overlapping webhook calls can show the same push twice.
+  If a write fails, pushes and replies are queued again. The same
+  HTTP finish-under-lock and release helpers keep pushes arriving at the deadline for the next call.
+- Delivery requires transcript calls: while the pendant is offline or no live conversation is running,
+  messages wait in the normal outbox. This route does not replace a WebSocket or another open request.
 
 ## Limits
 
@@ -239,3 +278,45 @@ S→C {"type":"capture_photo"}
 C→S {"type":"photo","data":"/9j/4AAQ..."}
 S→C {"type":"response","text":"A red bicycle leaning on a brick wall.","tts":false}
 ```
+
+## xiaozhi devices
+
+Stock xiaozhi-esp32 firmware discovers this transport through `POST /xiaozhi/ota/{token}` with its system-info
+JSON. The same paired device credential authenticates OTA and `GET /xiaozhi` (Bearer header or `?token=`).
+OTA returns only `websocket` (`url`, `token`, `version:1`), `server_time` (UTC milliseconds, offset 0), and
+`firmware` (the reported `application.version`, or `"0"`, with an empty download URL). No activation or MQTT is
+needed. The WebSocket URL uses the request Host and HTTPS / `X-Forwarded-Proto: https` for `wss`; override it
+with `platforms.glasses.extra.xiaozhi_url` or `GLASSES_XIAOZHI_URL` behind a proxy. Treat the OTA URL as a secret.
+
+Within 10 seconds the device sends `hello` and its Opus `audio_params`; the server replies with a fresh
+`session_id`, `transport:websocket`, and Opus 24 kHz mono / 60 ms output. `Protocol-Version` overrides the hello's
+`version` (default 1). Binary v1 is raw Opus; v2 uses the 16-byte version/type/reserved/timestamp/size header,
+v3 the 4-byte type/reserved/size header, with multibyte fields in network order. Non-audio or malformed binary
+headers are ignored. The input parameters are retained for wrapping microphone packets in Ogg Opus.
+
+`listen start` collects packets; `listen stop` submits one v1 audio/ogg query, with an empty text and a fresh id.
+Only recordings containing a speech-sized packet (over 12 bytes and over half a byte per millisecond of frame,
+for example over 30 bytes at 60 ms or 12 bytes at 20 ms) are submitted. Size cannot tell constant-bitrate
+silence from speech, so a silent recording may still be transcribed (and answered with "I couldn't hear that."). In `auto` / `realtime`, 800 ms of quiet
+packets (any packet that is not speech-sized, after speech) also ends the recording; libopus codes silence at
+16 kb/s in 0.3-0.4 byte per ms, so variable-bitrate silence and sent DTX packets count as quiet (firmware that sends nothing during DTX
+reaches the time limit instead). Constant-bitrate silence
+and steady background noise do not, and then the recording runs to its limit. Recordings end at 15 seconds of wall or
+audio time, or at 240,000 bytes of Opus. Packets over 1500 bytes are ignored, and a WebSocket message over 64 KiB
+closes the connection. `listen detect`, MCP and unknown types are ignored. `abort`
+cancels queued/current playback; it submits `/stop` only if this connection owns the active unanswered turn.
+
+The registered v1 connection declares `audio_out:["audio/mpeg"]`, speaker, mic and display. `transcript` becomes
+`stt`; thinking/working status becomes one thinking `llm` expression per turn. Responses, pushes and errors are
+spoken in order as `tts start`, `sentence_start` with text, binary Opus, `tts stop`. A matching MPEG `audio.ref`
+is awaited for up to 20 seconds from enqueue; without it (or for errors), only the text events are sent.
+`ffmpeg` converts MPEG to 24 kHz mono / 60 ms Opus, paced at about 55 ms per packet; missing ffmpeg falls back to
+text events with one warning. `display` becomes a neutral Hermes `alert`; other adapter frames are dropped.
+A push counts as delivered once its `tts stop` has been sent; a push that was aborted or not finished when the
+device disconnects goes back to the queue for the next connect (or another device). The device itself sends no
+playback acknowledgement, so a disconnect can repeat a partially heard push.
+
+`sim/xiaozhi_sim.py --ota <private-OTA-URL> --wav sim/sample-voice.wav --out reply.ogg` exercises the device flow.
+It prints incoming JSON, uploads Opus in manual mode and saves reply packets as Ogg. `--text-only` listens and
+prints without uploading a recording or saving audio. The bundled WAV is a generated two-second 16 kHz mono tone.
+Compatibility tests use fake adapter voice frames; physical firmware playback and live Hermes voice are unproven.

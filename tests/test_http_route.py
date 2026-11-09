@@ -595,3 +595,16 @@ async def test_no_audio_wait_without_speech(server, monkeypatch, body):
     await client.post('/turn', headers=headers,
                       json={'text': 'Hello', **body, 'capabilities': {'audio_out': ['audio/mpeg']}})
     assert waits == [50]
+
+
+@pytest.mark.parametrize('first,second', [(('alice', 'q1'), ('bob', 'q1')),
+                                          (('alice', 'watch-q1'), ('alice-watch', 'q1'))])
+async def test_lost_replies_of_two_users_never_share_a_queue_id(make_adapter, first, second):
+    from glasses_plugin.devices import Connection, Identity
+    adapter = make_adapter()
+    for user, turn in (first, second):
+        conn = Connection(http_api.HttpSocket(), Identity(user, 'watch'), protocol=1, slot='watch#http-x')
+        http_api._requeue(adapter, conn, f'{user} reply', turn)
+        http_api._requeue(adapter, conn, f'{user} reply', turn)  # the same reply twice is kept once
+    adapter.outbox.sent(adapter.outbox.drain(first[0])[0][3])  # the first user's recovered reply is delivered
+    assert [item[1] for item in adapter.outbox.drain(second[0])] == [f'{second[0]} reply']

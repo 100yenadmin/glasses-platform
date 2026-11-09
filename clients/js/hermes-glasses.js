@@ -8,6 +8,8 @@ export class HermesGlassesClient {
     this.interrupts = new Set();
     this.approvals = new Map();
     this.sequence = 0;
+    // Ids are per user on the server: a random prefix keeps two devices of one user from both sending q1.
+    this.idPrefix = Math.random().toString(36).slice(2, 10);
     this.backoff = 1000;
     this.closed = false;
   }
@@ -81,7 +83,12 @@ export class HermesGlassesClient {
   disconnect() {
     this.closed = true;
     clearTimeout(this.retryTimer);
-    this.socket?.close();
+    const ws = this.socket;
+    if (!ws) return;
+    // Settle everything now, so a connect() right after opens a fresh socket instead of reusing the closing one.
+    this.lost({code: 1000, reason: 'Client disconnected.'});
+    this.socket = null;
+    ws.close();
   }
   send(frame, handshake = false) {
     if (!this.socket || this.socket.readyState !== 1 || (!handshake && !this.ready))
@@ -90,7 +97,7 @@ export class HermesGlassesClient {
   }
   nextId() {
     let id;
-    do { id = `q${++this.sequence}`; } while (this.queries.has(id) || this.interrupts.has(id));
+    do { id = `q-${this.idPrefix}-${++this.sequence}`; } while (this.queries.has(id) || this.interrupts.has(id));
     return id;
   }
   ask({text = '', audio, image, speak, id = this.nextId(), timeout = 180000, signal} = {}) {

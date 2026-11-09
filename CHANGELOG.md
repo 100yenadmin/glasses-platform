@@ -4,7 +4,21 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 
 ## Unreleased
 
-- Even G2 Even Hub client: tap-to-talk PCM, streamed lens replies, queued pushes, approval choices and owner-packed network permissions. Simulator and real-device acceptance remain separate.
+- **Omi pendant.** Say “Hey Hermes, …” in a live Omi conversation to ask your agent through
+  `POST /omi/{token}/transcript`. Answers, reminders and approval prompts return as Omi notifications; slow
+  replies wait for the next transcript call. See [Omi setup](README.md#omi-pendant).
+- **Omi webhook fixes.** Prefix notifications with `Hermes: `, keep item heads oldest first within 1000
+  characters, acknowledge truncated pushes, and queue items with no room. Bound idle sessions and segment
+  deduplication, reject possessive wake words, and return `400` for deeply nested malformed JSON.
+- **ESP32 voice boxes (xiaozhi).** Boards running the open-source xiaozhi firmware pair with
+  `hermes glasses pair me voicebox --xiaozhi` and the device's OTA address: push to talk with Opus audio, spoken
+  answers, abort, and reminders played the next time the device connects. See
+  [ESP32 voice boxes](README.md#esp32-voice-boxes-xiaozhi).
+- **Even Realities G2 glasses.** An Even Hub app in `clients/even-g2`: tap the touchpad to talk, read the answer
+  on the lens as it streams, see reminders, and answer approvals from a Yes/No list. You pack it with your own
+  gateway address. See [the G2 client](clients/even-g2/README.md).
+
+## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
 - **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it
   and the words are handled exactly like typed text (spoken approvals and photo questions still work). Devices that

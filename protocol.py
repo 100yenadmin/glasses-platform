@@ -5,8 +5,8 @@ import re
 
 try:
     _VERSION = re.search(r'^version:\s*[\"\']?([^\s\"\']+)',
-                         Path(__file__).with_name('plugin.yaml').read_text(), re.M).group(1)
-except (OSError, AttributeError):
+                         Path(__file__).with_name('plugin.yaml').read_text(encoding='utf-8'), re.M).group(1)
+except (OSError, ValueError, AttributeError):
     _VERSION = 'unknown'
 
 

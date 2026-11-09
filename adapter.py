@@ -19,6 +19,8 @@ from . import audio, protocol
 from .capture import PhotoBroker, decode_photo, should_capture_photo
 from .devices import Connection, Outbox, Registry, authenticate, parse_devices
 from .http_api import register_routes
+from .omi import register_routes as register_omi_routes
+from .xiaozhi import register_routes as register_xiaozhi_routes
 
 logger = logging.getLogger(__name__)
 ACTIVE = None
@@ -170,6 +172,8 @@ class GlassesAdapter(BasePlatformAdapter):
         self._app.router.add_get(self._path, self._websocket)
         self._app.router.add_get('/health', self._health)
         register_routes(self, self._app)
+        register_omi_routes(self, self._app)
+        register_xiaozhi_routes(self, self._app)
         # Public aiohttp calls, not Hermes' private shared_ingress.bind_listener: glasses is not one of Hermes'
         # port-binding platforms, so its shared-listener mode never applies and the bind is the same.
         # Query credentials must never reach aiohttp's access log.
@@ -330,9 +334,9 @@ class GlassesAdapter(BasePlatformAdapter):
                 from tools.transcription_tools import transcribe_audio
                 data, ext = audio.decode(frame['audio'], self.broker.max_bytes)
                 path = await cache_audio_from_bytes_async(data, ext)
-                result = await asyncio.to_thread(transcribe_audio, path)
+                result = await asyncio.wait_for(asyncio.to_thread(transcribe_audio, path), 40)  # inside the HTTP turn wait
                 text = result.get('transcript', '').strip() if result.get('success') else ''
-                text = text.lstrip('/').strip()  # speech never issues slash commands (the stop button is `interrupt`)
+                text = re.sub(r'^[\s/]+', '', text)  # speech never issues slash commands (the stop button is `interrupt`)
                 if not text:
                     raise ValueError('Empty transcript')
                 await conn.send_json(protocol.transcript(frame.get('id'), text))
@@ -445,7 +449,8 @@ class GlassesAdapter(BasePlatformAdapter):
                 self.outbox.track(user, item)
         else:
             self._mark_delivered(user, message_id)
-        self._speak(conn, text, frame['id'] if frame['type'] == 'approval_request' else message_id)
+        if not conn.slot:  # an HTTP answer carries only the turn's own audio: no speech for its pushes
+            self._speak(conn, text, frame['id'] if frame['type'] == 'approval_request' else message_id)
         return True
 
     async def _flush_later(self, conn, delay):
