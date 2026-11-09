@@ -2,6 +2,19 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## Unreleased
+
+- **Omi pendant.** Say “Hey Hermes, …” in a live Omi conversation to ask your agent through
+  `POST /omi/{token}/transcript`. Answers, reminders and approval prompts return as Omi notifications; slow
+  replies wait for the next transcript call. See [Omi setup](README.md#omi-pendant).
+- **Omi webhook fixes.** Prefix notifications with `Hermes: `, keep item heads oldest first within 1000
+  characters, acknowledge truncated pushes, and queue items with no room. Bound idle sessions and segment
+  deduplication, reject possessive wake words, and return `400` for deeply nested malformed JSON.
+- **ESP32 voice boxes (xiaozhi).** Boards running the open-source xiaozhi firmware pair with
+  `hermes glasses pair me voicebox --xiaozhi` and the device's OTA address: push to talk with Opus audio, spoken
+  answers, abort, and reminders played the next time the device connects. See
+  [ESP32 voice boxes](README.md#esp32-voice-boxes-xiaozhi).
+
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
 - **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it
