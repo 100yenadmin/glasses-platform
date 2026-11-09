@@ -1,5 +1,7 @@
 """Short-lived v1 connections for devices that cannot keep a WebSocket open."""
 import asyncio
+import hashlib
+import json
 import time
 from uuid import uuid4
 
@@ -107,7 +109,9 @@ def _requeue(adapter, conn, reply=None, turn_id=None, shown=None):
             items.append(item)
     adapter.outbox.forget(done)
     if reply:
-        items.append((time.time(), reply, 'reply', f'reply-{user}-{turn_id}'))  # queue ids are global: per user
+        # Queue ids are global: one stable id per (user, turn), so the same reply is kept once and users never collide.
+        key = hashlib.sha256(json.dumps([user, turn_id]).encode()).hexdigest()[:32]
+        items.append((time.time(), reply, 'reply', f'reply-{key}'))
     adapter.outbox.merge(user, items)
 
 

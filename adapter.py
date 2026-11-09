@@ -330,7 +330,7 @@ class GlassesAdapter(BasePlatformAdapter):
                 from tools.transcription_tools import transcribe_audio
                 data, ext = audio.decode(frame['audio'], self.broker.max_bytes)
                 path = await cache_audio_from_bytes_async(data, ext)
-                result = await asyncio.wait_for(asyncio.to_thread(transcribe_audio, path), 60)
+                result = await asyncio.wait_for(asyncio.to_thread(transcribe_audio, path), 40)  # inside the HTTP turn wait
                 text = result.get('transcript', '').strip() if result.get('success') else ''
                 text = re.sub(r'^[\s/]+', '', text)  # speech never issues slash commands (the stop button is `interrupt`)
                 if not text:
