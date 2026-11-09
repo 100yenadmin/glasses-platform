@@ -98,21 +98,19 @@ test('errors and disconnect reject operations, duplicate ids do not overwrite', 
   await assert.rejects(client.ask({text: 'offline'}), /Not connected/);
 });
 
-test('uncorrelated query errors preserve reset; reset-only errors reject it', async () => {
+test('errors without query text reject a pending reset too', async () => {
   const {client, socket} = setup();
   const query = assert.rejects(client.ask({id: 'one'}), /empty/);
   const resetPromise = client.newSession();
   assert.equal(resetPromise, client.newSession());
+  const resetError = assert.rejects(resetPromise, /empty/);
   socket.frame({type: 'error', message: 'empty'});
   await query;
-  assert.ok(client.resetWait);
-  socket.frame({type: 'session_reset'});
-  await resetPromise;
+  await resetError;
+  assert.equal(client.resetWait, null);
   const reset = assert.rejects(client.newSession(), /reset failed/);
   socket.frame({type: 'error', message: 'reset failed'});
   await reset;
-  client.interrupt('stop');
-  assert.deepEqual(socket.sent.at(-1), {type: 'interrupt', id: 'stop'});
   client.disconnect();
 });
 
@@ -189,40 +187,69 @@ test('HTTP: Bearer, plain text, JSON, pending 202, approval and errors', async (
   await assert.rejects(http.pending(), /HTTP 401/);
 });
 
-test('folded asks are superseded in send order without stale status ids', async t => {
+test('approval yes replies before the running ask without settling it', async t => {
   const {client, socket} = setup();
   t.after(() => client.disconnect());
-  const first = client.ask({id: 'first', text: 'one'}).catch(error => error);
-  const middle = client.ask({id: 'middle', text: 'two'}).catch(error => error);
-  const last = client.ask({id: 'last', text: 'three'});
-  const slash = client.ask({id: 'slash', text: ' /status'});
-  socket.frame({type: 'response', turn: 'slash', text: 'working'});
-  assert.equal((await slash).text, 'working');
-  assert.equal(client.queries.size, 3, 'slash replies do not supersede ordinary asks');
-  socket.frame({type: 'response', turn: 'last', text: 'latest'});
-  assert.equal(client.queries.size, 0);
-  for (const error of await Promise.all([first, middle])) {
-    assert.ok(error instanceof Error);
-    assert.equal(error.code, 'superseded');
-    assert.match(error.message, /superseded/i);
-  }
-  assert.equal((await last).text, 'latest');
-  let status;
-  client.on('status', frame => { status = frame; });
-  socket.frame({type: 'status', state: 'idle'});
-  assert.equal(status.id, undefined);
+  const first = client.ask({id: 'first', text: 'run command'}).catch(error => error);
+  socket.frame({type: 'push', id: 'approval', origin: 'approval', text: 'Allow?'});
+  const yes = client.ask({id: 'yes', text: 'yes'});
+  socket.frame({type: 'response', turn: 'yes', text: 'Okay, going ahead.'});
+  assert.equal((await yes).text, 'Okay, going ahead.');
+  assert.ok(client.queries.has('first'));
+  socket.frame({type: 'response', turn: 'first', text: 'Command completed.'});
+  assert.deepEqual(await first, {id: 'first', text: 'Command completed.'});
+});
+
+test('audio ask and later text ask resolve their own out-of-order replies', async t => {
+  const {client, socket} = setup();
+  t.after(() => client.disconnect());
+  const audio = client.ask({id: 'audio', audio: {data: 'AA==', mime: 'audio/wav'}}).catch(error => error);
+  const text = client.ask({id: 'text', text: 'later'});
+  socket.frame({type: 'response', turn: 'text', text: 'Text reply'});
+  assert.deepEqual(await text, {id: 'text', text: 'Text reply'});
+  socket.frame({type: 'transcript', turn: 'audio', text: 'spoken'});
+  socket.frame({type: 'response', turn: 'audio', text: 'Audio reply'});
+  assert.deepEqual(await audio, {id: 'audio', text: 'Audio reply', transcript: 'spoken'});
 });
 
 test('interrupt rejects the stopped ask and removes its entry', async t => {
   const {client, socket} = setup();
   t.after(() => client.disconnect());
   for (const explicit of [true, false]) {
-    const answer = client.ask({id: 'stop', text: 'hello'}).catch(error => error);
-    client.interrupt(explicit ? 'stop' : undefined);
-    assert.equal(client.queries.size, 0);
+    const slash = client.ask({id: 'slash', text: '/status'});
+    const answer = client.ask({id: 'q1', text: 'hello'}).catch(error => error);
+    const other = client.ask({id: 'other', text: 'later'});
+    client.interrupt(explicit ? {ask: 'q1'} : undefined);
+    assert.equal(client.queries.size, 2);
     assert.equal((await answer).code, 'interrupted');
-    assert.equal(socket.sent.at(-1).type, 'interrupt');
+    const stop = socket.sent.at(-1);
+    assert.equal(stop.type, 'interrupt');
+    assert.equal(typeof stop.id, 'string');
+    assert.ok(!['q1', 'other', 'slash'].includes(stop.id));
+    await assert.rejects(client.ask({id: stop.id}), /unique/);
+    socket.frame({type: 'response', turn: stop.id, text: 'Stopped.'});
+    assert.equal(client.queries.size, 2);
+    socket.frame({type: 'response', turn: 'other', text: 'Own reply'});
+    socket.frame({type: 'response', turn: 'slash', text: 'Status'});
+    assert.equal((await other).text, 'Own reply');
+    await slash;
   }
+});
+
+test('default timeout expires folded asks at 180000 ms; zero disables it', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const {client, socket} = setup();
+  t.after(() => client.disconnect());
+  const folded = client.ask({id: 'folded'}).catch(error => error);
+  const unlimited = client.ask({id: 'unlimited', timeout: 0});
+  t.mock.timers.tick(179999);
+  assert.ok(client.queries.has('folded'));
+  t.mock.timers.tick(1);
+  assert.equal((await folded).code, 'timeout');
+  assert.equal(client.queries.has('folded'), false);
+  assert.ok(client.queries.has('unlimited'));
+  socket.frame({type: 'response', turn: 'unlimited', text: 'Late reply'});
+  assert.equal((await unlimited).text, 'Late reply');
 });
 
 test('ask timeout and AbortSignal settle and clean up without disconnecting', async t => {
@@ -264,6 +291,44 @@ test('uncorrelated errors resolve text already received and preserve an in-fligh
   assert.ok(client.resetWait);
   socket.frame({type: 'session_reset'});
   assert.equal((await reset).type, 'session_reset');
+});
+
+test('New session failed rejects reset even while query text awaits audio', async t => {
+  const {client, socket} = setup({serverFeatures: ['audio_out'],
+    device: {name: 'audio', capabilities: {audio_out: ['audio/wav']}}});
+  t.after(() => client.disconnect());
+  const answer = client.ask({id: 'text'});
+  socket.frame({type: 'response', turn: 'text', text: 'kept'});
+  const reset = assert.rejects(client.newSession(), /New session failed/);
+  socket.frame({type: 'error', message: 'New session failed.'});
+  await reset;
+  assert.equal(client.resetWait, null);
+  assert.equal((await answer).text, 'kept');
+});
+
+test('automatic reconnect retries constructor failures with continuing backoff', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const {client, socket} = setup({reconnect: true});
+  let attempts = 0;
+  client.WebSocketImpl = class extends Socket {
+    constructor(url) {
+      if (++attempts === 1) throw new Error('temporary transport failure');
+      super(url);
+    }
+  };
+  t.after(() => client.disconnect());
+  socket.close(1006);
+  t.mock.timers.tick(1000);
+  assert.equal(attempts, 1);
+  assert.equal(client.closed, false);
+  assert.equal(client.backoff, 4000);
+  t.mock.timers.tick(2000);
+  assert.equal(attempts, 2);
+  const next = Socket.instances.at(-1);
+  next.frame({type: 'welcome'});
+  next.frame({type: 'hello_ack', server: {features: []}});
+  assert.equal(client.ready, true);
+  assert.equal(client.backoff, 1000);
 });
 
 test('audio wait requires server audio_out feature', async t => {

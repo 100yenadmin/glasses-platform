@@ -34,8 +34,9 @@ removes it. Events: `connected`, `disconnected`, `push`, `approval_request`,
 `delta` and `transcript` include `id` from `turn`. The protocol's `status` has no
 turn id; `id` is inferred only while exactly one query is outstanding. Uncorrelated
 server errors resolve queries that already have text and reject queries without text.
-A pending reset is rejected only when no query is in flight; correlated error
-extensions affect only their matching query. No new correlation fields are sent.
+A pending reset is also rejected on `New session failed.` or on any error when no
+query has text. Correlated error extensions affect only their matching query.
+No new correlation fields are sent.
 
 Each `ask` uses a unique id. Responses resolve with `{id, text, transcript?, audio?}`.
 Devices declaring `audio_out` wait at most 15 seconds after text for audio when the
@@ -46,14 +47,14 @@ operations; queries are never replayed. Reconnect uses jittered exponential back
 from 1 to 30 seconds and repeats hello; 4401 stops retries. `disconnect()` stops
 retries. Invalid URLs reject and emit an error once without retrying.
 `newSession()` coalesces simultaneous resets because session_reset has no id.
-Replies to ordinary queries arrive in send order. When Hermes folds asks into a
-later turn, its response rejects earlier unanswered asks with an Error whose
-message says superseded and whose `code` is `superseded`. Slash-command replies do
-not supersede asks. `interrupt(id)` rejects that ask with `code: 'interrupted'`;
-without an id it rejects the oldest unanswered ordinary ask.
-`ask({text, timeout: 10000, signal: controller.signal})` adds a total timeout in ms
+Replies can arrive out of order; each response settles only its matching `turn`.
+A folded ask with no reply waits until its timeout, signal, interrupt, error, or
+disconnect. Every ask defaults to a 180000 ms total timeout; `timeout: 0` disables
+it. `ask({text, timeout: 10000, signal: controller.signal})` sets a custom timeout
 and/or AbortSignal cancellation (`code: 'timeout'` / `'aborted'`). These cancel the
-local wait; use `interrupt()` to send a stop to Hermes. Neither option is required.
+local wait. `interrupt({ask: id})` sends a fresh `/stop` turn and rejects the
+specified ask with `code: 'interrupted'`; `interrupt()` selects the oldest
+unanswered non-slash ask. The stop reply is consumed and cannot settle another ask.
 
 For platforms without a socket:
 
@@ -68,6 +69,7 @@ await http.approval(promptId, selectedChoice);
 HTTP helpers send Bearer authentication, preserve pending/needs_answer bodies (202
 is successful), and throw on non-success status codes. Text mode returns
 `{status, text}`, mapping HTTP 202 to `pending` and other success codes to `done`.
+Plain text cannot distinguish `needs_answer` from `done`; use JSON mode for that.
 The server HTTP routes must ship in the same release as these helpers.
 WebSockets use a URL token;
 keep connect URLs out of logs and use HTTPS/WSS away from localhost. Socket and fetch
