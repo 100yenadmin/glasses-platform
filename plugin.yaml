@@ -1,11 +1,11 @@
 name: glasses-platform
 kind: platform
 label: Smart glasses
-version: "0.3.1"
+version: "0.3.2"
 author: 100yenadmin
 requires_hermes: ">=0.22.2"
 description: >
-  Talk to your Hermes agent through smart glasses, share camera photos, receive reminders, and approve commands
+  Hermes Glasses: talk to your Hermes agent through smart glasses, share camera photos, receive reminders, and approve commands
   by voice. Pair a device with one command (`hermes glasses pair`) or try it from the terminal (`hermes glasses try`).
   A hardware-independent WebSocket channel with legacy and v1 clients.
   Disclosure — listens on a network port; device tokens grant full agent access; `hermes glasses pair` writes
