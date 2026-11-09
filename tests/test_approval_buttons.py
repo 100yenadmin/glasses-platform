@@ -130,6 +130,7 @@ async def test_button_prompt_has_audio_when_declared(approvals, speech):
     await ask()
     await drained(adapter)
     assert [f['type'] for f in conn.ws.frames] == ['approval_request', 'audio']
+    assert conn.ws.frames[1]['ref'] == conn.ws.frames[0]['id'] == 'r1'  # the device can match audio to the card
     speech[1].assert_called_once_with(conn.ws.frames[0]['text'])
 
 
@@ -166,3 +167,15 @@ async def test_websocket_button_dispatch_is_v1_only(hermes):
     assert calls[0][2] == 'r1'
     await ws.close()
     await legacy.close()
+
+
+@pytest.mark.asyncio
+async def test_a_button_device_that_answers_by_voice_also_closes_its_card(approvals, speech):
+    adapter, _, calls, ask = approvals
+    conn = await device(adapter, buttons=True)
+    await ask()
+    speech[0].return_value = {'success': True, 'transcript': 'yes'}
+    adapter.handle_message = AsyncMock()
+    await adapter._process_query(conn, {'id': 'q1', 'audio': recording()})
+    assert calls == [('agent:main:glasses:dm:alice', 'once', 'r1')]
+    assert {'type': 'approval_closed', 'id': 'r1', 'choice': 'once'} in conn.ws.frames

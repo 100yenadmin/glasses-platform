@@ -275,3 +275,40 @@ def test_hello_ack_advertises_real_version_and_features():
     frame = protocol.hello_ack('alice', 'ray')
     assert f'version: "{frame["server"]["version"]}"' in manifest
     assert frame['server']['features'] == ['audio_in', 'audio_out', 'approval_buttons', 'ack', 'display', 'haptic']
+
+
+@pytest.mark.asyncio
+async def test_speak_false_of_one_user_never_silences_another_user_with_the_same_id(make_adapter, speech):
+    adapter = make_adapter(devices='alice:ray=a,bob:ray=b')
+    alice = await device(adapter, audio_out=['audio/mpeg'])
+    bob = await device(adapter, user='bob', audio_out=['audio/mpeg'])
+    adapter.handle_message = AsyncMock()
+    await adapter._process_query(bob, {'id': 'q1', 'text': 'hi'})
+    await adapter._process_query(alice, {'id': 'q1', 'text': 'hi', 'speak': False})  # same id, later
+    await adapter._deliver_reply('bob', bob, 'q1', 'Bob hears this.')
+    await drained(adapter)
+    assert [f['type'] for f in bob.ws.frames] == ['response', 'audio']
+
+
+@pytest.mark.asyncio
+async def test_spoken_slash_commands_are_plain_words(make_adapter, speech):
+    adapter = make_adapter()
+    conn = await device(adapter)
+    speech[0].return_value = {'success': True, 'transcript': '/approve always'}
+    adapter.handle_message = AsyncMock()
+    await adapter._process_query(conn, {'id': 'q1', 'audio': recording()})
+    assert adapter.handle_message.call_args.args[0].text == 'approve always'
+
+
+@pytest.mark.asyncio
+async def test_a_failed_synthesis_is_not_remembered(make_adapter, speech, tmp_path):
+    adapter = make_adapter()
+    conn = await device(adapter, audio_out=['audio/mpeg'])
+    good = speech[1].return_value
+    speech[1].return_value = json.dumps({'success': False})
+    await adapter._deliver_reply('alice', conn, 'q1', 'Same words.')
+    await drained(adapter)
+    speech[1].return_value = good
+    await adapter._deliver_reply('alice', conn, 'q2', 'Same words.')
+    await drained(adapter)
+    assert [f['ref'] for f in conn.ws.frames if f['type'] == 'audio'] == ['q2']

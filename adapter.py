@@ -151,6 +151,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
         self._approval_sessions = {}  # user -> Hermes session keys that have asked this user's devices for approval
         self._silent, self._speech = {}, OrderedDict()
+        self._speech_slots = asyncio.Semaphore(2)
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -316,7 +317,7 @@ class GlassesAdapter(BasePlatformAdapter):
         return next((other for other in reversed(live) if other.identity == conn.identity), None)
 
     async def _process_query(self, conn, frame, reset=False):
-        self._silent[frame.get('id')] = frame.get('speak') is False
+        self._silent[(conn.identity.user, frame.get('id'))] = frame.get('speak') is False
         while len(self._silent) > 200:
             self._silent.pop(next(iter(self._silent)))
         text = frame.get('text', '')
@@ -329,6 +330,7 @@ class GlassesAdapter(BasePlatformAdapter):
                 path = await cache_audio_from_bytes_async(data, ext)
                 result = await asyncio.to_thread(transcribe_audio, path)
                 text = result.get('transcript', '').strip() if result.get('success') else ''
+                text = text.lstrip('/').strip()  # speech never issues slash commands (the stop button is `interrupt`)
                 if not text:
                     raise ValueError('Empty transcript')
                 await conn.send_json(protocol.transcript(frame.get('id'), text))
@@ -438,7 +440,7 @@ class GlassesAdapter(BasePlatformAdapter):
                 self.outbox.track(user, item)
         else:
             self._mark_delivered(user, message_id)
-        self._speak(conn, text, message_id)
+        self._speak(conn, text, frame['id'] if frame['type'] == 'approval_request' else message_id)
         return True
 
     async def _flush_later(self, conn, delay):
@@ -593,35 +595,40 @@ class GlassesAdapter(BasePlatformAdapter):
     async def _deliver_reply(self, user, conn, query_id, text):
         if not (conn in self.registry.live(user) and await conn.send_json(protocol.response(conn.protocol, text, query_id))):
             message_id = uuid4().hex
-            self._silent[message_id] = self._silent.get(query_id, False)
+            self._silent[(user, message_id)] = self._silent.get((user, query_id), False)
             await self._push(user, text, 'reply', message_id)  # the asker went offline: deliver out of band
-        elif not self._silent.get(query_id):
+        elif not self._silent.get((user, query_id)):
             self._speak(conn, text, query_id)
         await self._answered(conn, query_id)
 
     def _speak(self, conn, text, ref):
-        mime = audio.output_mime(conn.capabilities) if conn.protocol == 1 else None
-        if mime and not self._silent.get(ref):
-            self._spawn(self._send_speech(conn, text, ref, mime))
+        mimes = audio.output_mimes(conn.capabilities) if conn.protocol == 1 else []
+        if mimes and not self._silent.get((conn.identity.user, ref)):
+            self._spawn(self._send_speech(conn, text, ref, mimes))
 
-    async def _send_speech(self, conn, text, ref, mime):
+    async def _send_speech(self, conn, text, ref, mimes):
         # The text sender may hold this lock; synthesis must start after it has released it.
         async with self._lock(conn.identity.user):
             pass
-        key = (text, mime)
-        task = self._speech.get(key)
-        if task is None:
-            task = self._speech[key] = self._spawn(self._synthesise(text, mime))
-            while len(self._speech) > 16:
-                self._speech.popitem(last=False)
-        data = await asyncio.shield(task)
-        if data:
-            await conn.send_json(protocol.audio(ref, base64.b64encode(data).decode(), mime))
+        for mime in mimes:  # the device's formats in its order: the next one if a conversion fails
+            key = (text, mime)
+            task = self._speech.get(key)
+            if task is None:
+                task = self._speech[key] = self._spawn(self._synthesise(text, mime))
+                while len(self._speech) > 16:
+                    self._speech.popitem(last=False)
+            data = await asyncio.shield(task)
+            if data:
+                await conn.send_json(protocol.audio(ref, base64.b64encode(data).decode(), mime))
+                return
+            if self._speech.get(key) is task:
+                self._speech.pop(key, None)  # a failure is not remembered: the next reply tries again
 
     async def _synthesise(self, text, mime):
         try:
             from tools.tts_tool import text_to_speech_tool
-            result = json.loads(await asyncio.to_thread(text_to_speech_tool, text))
+            async with self._speech_slots:  # at most two syntheses at once, e.g. when a full queue is flushed
+                result = json.loads(await asyncio.wait_for(asyncio.to_thread(text_to_speech_tool, text), 60))
             paths = result.get('file_paths') or ([result['file_path']] if result.get('file_path') else [])
             if result.get('success') is False or not paths:
                 raise ValueError('No TTS files')
@@ -764,7 +771,7 @@ class GlassesAdapter(BasePlatformAdapter):
             said = 'This command can only be blocked. Say no to block it.'
         elif certain and resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
             self._approvals.pop(user, None)
-            await self._close_approval(user, approval, choice, conn)
+            await self._close_approval(user, approval, choice)  # the speaking device's card closes too
             said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
         else:
             self._live_approvals(user)

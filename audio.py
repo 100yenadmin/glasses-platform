@@ -38,17 +38,24 @@ def decode(recording, max_bytes):
     return data, MIME_EXT[mime]
 
 
-def output_mime(capabilities):
+def output_mimes(capabilities):
+    """The device's playable formats, in its order, that this server can produce."""
     formats = capabilities.get('audio_out')
-    if isinstance(formats, list):
-        return next((mime for mime in formats if mime == 'audio/mpeg' or
-                     (mime in ('audio/ogg', 'audio/wav') and shutil.which('ffmpeg'))), None)
+    if not isinstance(formats, list):
+        return []
+    ffmpeg = shutil.which('ffmpeg')
+    return [mime for mime in formats if mime == 'audio/mpeg' or (mime in ('audio/ogg', 'audio/wav') and ffmpeg)]
+
+
+def output_mime(capabilities):
+    return next(iter(output_mimes(capabilities)), None)
 
 
 async def encode_files(paths, mime):
     """Join Hermes' MP3 chunks, optionally transcode to the negotiated wire format."""
     ffmpeg = shutil.which('ffmpeg')
-    if mime == 'audio/mpeg' and (len(paths) == 1 or not ffmpeg):
+    all_mp3 = all(Path(path).suffix.lower() == '.mp3' for path in paths)
+    if mime == 'audio/mpeg' and all_mp3 and (len(paths) == 1 or not ffmpeg):  # MP3 frames join byte-wise
         return await asyncio.to_thread(lambda: b''.join(Path(path).read_bytes() for path in paths))
     if not ffmpeg:
         raise ValueError('Audio format unavailable')
@@ -64,7 +71,7 @@ async def encode_files(paths, mime):
     process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE,
                                                    stderr=asyncio.subprocess.PIPE)
     try:
-        data, _ = await process.communicate()
+        data, _ = await asyncio.wait_for(process.communicate(), 30)
         if process.returncode:
             raise ValueError('Audio conversion failed')
         return data
