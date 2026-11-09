@@ -152,7 +152,11 @@ test('#44: when the reply comes back on the first ask, the answer ask is release
   const opener = socket.sent.at(-1);
   socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
   await talk(app, [2]);
+  const answer = socket.sent.at(-1);
+  assert.notEqual(answer.id, opener.id); assert.equal(answer.audio.data, 'Ag==');
   socket.frame({type: 'response', turn: opener.id, text: 'Done.'}); await flush();
+  socket.frame({type: 'response', turn: answer.id, text: 'late'}); await flush();
+  assert.ok(!views.some(([, text]) => text.endsWith('late')));  // released: a late reply to it is ignored
   assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Done.')));
   assert.ok(!views.some(([kind]) => kind === 'error'));
   t.mock.timers.tick(1500); await flush();
