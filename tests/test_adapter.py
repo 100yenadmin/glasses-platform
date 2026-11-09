@@ -228,3 +228,9 @@ async def test_a_reused_query_id_gets_a_fresh_hermes_id_and_its_own_reply(server
         await ws.close()
     assert len(set(seen)) == 2 and all(value.startswith('q1~g') for value in seen)
     assert 'alice' not in adapter._active_turn
+
+
+@pytest.mark.parametrize('wire', ['q1', 'q1\nq2', 'a~g1234abcd', ' '])
+def test_hermes_ids_round_trip_to_the_device_id(wire):
+    from glasses_plugin.adapter import _hermes_id, _wire_id
+    assert _wire_id(_hermes_id(wire)) == wire and _hermes_id(wire) != wire

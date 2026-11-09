@@ -87,7 +87,7 @@ def _as_media(metadata):
 
 # Hermes wraps cron deliveries in a header (job name and id) and a footer (how to stop the job). Read aloud on
 # glasses that is noise: the wearer hears the job's own words, and the push frame says it came from cron.
-_HERMES_ID = re.compile(r'(.+)~g[0-9a-f]{8}')
+_HERMES_ID = re.compile(r'(.+)~g[0-9a-f]{8}', re.DOTALL)
 
 
 def _hermes_id(wire):
