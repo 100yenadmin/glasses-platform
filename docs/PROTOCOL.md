@@ -148,7 +148,8 @@ A v1 device declares what it has in `hello.device.capabilities`. Every field is 
 rate, default 16000). `text` may be empty. The server transcribes with Hermes's own speech-to-text (the `stt`
 settings in Hermes's config), sends `transcript` to the asking device, then handles the words exactly like a typed
 `query`: a spoken "yes" still answers an approval, "what am I looking at" still takes a photo. When nothing could
-be heard the device gets `error` ("I couldn't hear that.") as the answer to that query.
+be heard the device gets `error` ("I couldn't hear that.") as the answer to that query; in v1 it carries the query's
+id as `turn`, so a client with other queries in flight knows which one failed.
 
 **Voice out.** The server speaks with Hermes's own text-to-speech (the `tts` settings). Devices that declared
 `audio_out` get an `audio` frame after each `response` and `push`; a `query` with `speak:false` turns it off for

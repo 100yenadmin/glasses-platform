@@ -113,7 +113,7 @@ async def test_bad_audio_answers_with_error(make_adapter, speech, failure):
     else:
         value = recording('audio/pcm', b'\0')
     await adapter._process_query(conn, {'id': 'q1', 'audio': value})
-    assert conn.ws.frames == [protocol.error("I couldn't hear that.")]
+    assert conn.ws.frames == [protocol.error("I couldn't hear that.", 'q1')]  # v1: names the query that failed
     assert not conn.asking
     adapter.handle_message.assert_not_called()
 
@@ -313,3 +313,8 @@ async def test_a_failed_synthesis_is_not_remembered(make_adapter, speech, tmp_pa
     await adapter._deliver_reply('alice', conn, 'q2', 'Same words.')
     await drained(adapter)
     assert [f['ref'] for f in conn.ws.frames if f['type'] == 'audio'] == ['q2']
+
+
+def test_query_errors_name_their_query_in_v1_only():
+    assert protocol.error('Empty query.', 'q7') == {'type': 'error', 'message': 'Empty query.', 'turn': 'q7'}
+    assert protocol.error('Empty query.') == {'type': 'error', 'message': 'Empty query.'}  # v0 frame stays exact

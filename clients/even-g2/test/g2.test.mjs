@@ -223,3 +223,33 @@ test('#44 review: two questions in one turn; the deadline follows the latest ans
   await talk(app, [4]);
   assert.equal(socket.sent.at(-1).audio.data, 'BA==');
 });
+test('#44 release review: an answer that was not heard asks the question again; the turn goes on', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  const opener = socket.sent.at(-1);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  socket.frame({type: 'error', turn: socket.sent.at(-1).id, message: "I couldn't hear that."}); await flush();
+  assert.deepEqual(views.at(-1), ['push', "I couldn't hear that.\nHermes asks\nWhich door?\nTap to answer"]);
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  await talk(app, [3]);
+  const answer = socket.sent.at(-1);
+  assert.notEqual(answer.id, opener.id); assert.equal(answer.audio.data, 'Aw==');
+  socket.frame({type: 'response', turn: answer.id, text: 'Locked the back door.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door.')));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [4]);
+  assert.equal(socket.sent.at(-1).audio.data, 'BA==');  // the turn ended
+});
+test('#44 release review: a spoken answer to a text approval gets its own reply and the turn carries on', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  const opener = socket.sent.at(-1);
+  socket.frame({type: 'push', origin: 'approval', text: 'Hermes wants to run: rm -rf build. Say yes or no.'});
+  await talk(app, [2]);
+  socket.frame({type: 'response', turn: socket.sent.at(-1).id, text: 'Okay, going ahead.'}); await flush();
+  assert.deepEqual(views.at(-1), ['thinking', 'Okay, going ahead.']);
+  socket.frame({type: 'response', turn: opener.id, text: 'Deleted the build folder.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Deleted the build folder.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+});
