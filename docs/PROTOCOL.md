@@ -262,6 +262,34 @@ access alone is insufficient. See [setup](../README.md#omi-pendant). The plugin 
 - Delivery requires transcript calls: while the pendant is offline or no live conversation is running,
   messages wait in the normal outbox. This route does not replace a WebSocket or another open request.
 
+## Bobby (Pebble) endpoint
+
+The [Bobby assistant](https://github.com/pebble-dev/bobby-assistant) can use this listener without a protocol patch:
+set its `QUERY_URL` to `wss://<host>/bobby/<token>/query` and `QUOTA_URL` to
+`https://<host>/bobby/<token>/quota`. Authenticate with the plugin device token in the path, never the `token`
+query parameter (Bobby's Pebble timeline token, ignored). No headers are required; `Origin: null` is accepted.
+
+- `GET /bobby/{token}/quota` returns `200 {"used":0,"remaining":1000000,"hasSubscription":true}`; bad token: `401`.
+- `GET /bobby/{token}/query?prompt=...` upgrades to WebSocket. Bad tokens are accepted, sent `d`, then closed with
+  code `1008` and reason `Unauthorized`, which Bobby forwards to the watch. Missing/blank prompt: `wNo question.`,
+  `d`, then close `1000`.
+- A valid prompt becomes a normal v1 `query`, with empty capabilities and a separate short-lived registry slot.
+  `threadId` and all other Bobby metadata are ignored; Hermes keeps the user's shared conversation.
+- Text frames: `fThinking…` once, then `c<new text>` chunks preserving whitespace. Hermes's cumulative deltas
+  become increments, and the final response sends only its remaining text. Complete `<<!!WIDGET:{json}!!>>`
+  markers are stripped, including markers split across deltas. No `a` action frames are sent; client frames are ignored.
+- Queued pushes follow the answer as `c\n\nReminder: <text>` (`cron`) or `c\n\n<Origin>: <text>`. Finish with one
+  `d`, then `t<uuid>` and close `1000`. Approval/clarify prompts are plain chat text followed by the same finish;
+  the next question can answer yes/no. An agent error is a `w` warning followed by the same finish.
+- `bobby_wait` / `GLASSES_BOBBY_WAIT` defaults to 45 seconds. On timeout, send
+  `cStill working; ask again in a moment for the answer.`, then the same pushes/finish. The late reply is queued
+  by the adapter and shown with the next answer.
+- Pushes count as shown only after their chat frames and `d` are successfully sent. A failure before `d` requeues
+  every push plus any completed turn reply; a still-running reply follows through the adapter's offline queue.
+  This proves a server write, not watch receipt. Widgets and watch-side actions are unsupported.
+
+See [Pebble (Bobby)](../README.md#pebble-bobby) for build steps and phone reachability requirements.
+
 ## Limits
 
 - **Frame size:** the server's maximum is 8 MB by default (`GLASSES_MAX_FRAME_MB`). Downscale photos to about
