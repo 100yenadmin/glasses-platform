@@ -4,6 +4,8 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 
 ## Unreleased
 
+- Even G2 Even Hub client: tap-to-talk PCM, streamed lens replies, queued pushes, approval choices and owner-packed network permissions. Simulator and real-device acceptance remain separate.
+
 - **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it
   and the words are handled exactly like typed text (spoken approvals and photo questions still work). Devices that
   declare `audio_out` get each answer and push as audio from Hermes's own text-to-speech.
