@@ -11,7 +11,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-# Works both standalone and with tests/conftest.py's Hermes import isolation.
+# Runs standalone (clients/python/conftest.py) and in the full suite with tests/conftest.py isolation.
 path = Path(__file__).with_name('hermes_glasses.py')
 spec = importlib.util.spec_from_file_location('hermes_glasses', path)
 module = importlib.util.module_from_spec(spec)
@@ -349,7 +349,10 @@ async def test_ack_only_when_declared_and_manual_photos(ack):
         peer.client.on('push', pushes.append)
         await peer.send({'type': 'push', 'id': 'push', 'text': 'hi'})
         peer.client.send_photo('camera', '/9j/2Q==')
-        photo = await peer.next('ack' if ack else 'photo')
+        # Read the very next frame (peer.next would skip a stray ack).
+        photo = await asyncio.wait_for(peer.frames.get(), 2)
+        while photo['type'] == 'hello':
+            photo = await asyncio.wait_for(peer.frames.get(), 2)
         assert photo['type'] == ('ack' if ack else 'photo')
         if ack:
             assert photo['id'] == 'push'
@@ -430,6 +433,10 @@ async def test_disconnect_fails_every_pending_operation_no_replay_and_fresh_conn
         clock.fire(delay)
         await until(lambda: peer.client.ready)
         await peer.next('hello')
+        reset = asyncio.create_task(peer.client.new_session())  # a round trip: anything replayed would arrive first
+        assert (await asyncio.wait_for(peer.frames.get(), 2))['type'] == 'new_session'
+        await peer.send({'type': 'session_reset'})
+        await reset
         assert peer.frames.empty() and len(peer.requests) == 2
         await peer.client.disconnect()
         await peer.client.connect()
@@ -538,3 +545,26 @@ async def test_http_bearer_json_pending_needs_answer_plain_errors_and_long_poll(
     with pytest.raises(Error) as failure:
         await http.pending()
     assert 'fixture-secret' not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_a_frame_that_cannot_be_sent_fails_its_ask_and_the_connection_keeps_working():
+    async with connected() as peer:
+        with pytest.raises(Error) as failure:
+            await peer.client.ask(text='bad', image={'data': b'raw-bytes', 'mime': 'image/jpeg'}, timeout=2)
+        assert 'cannot be sent' in str(failure.value) and not peer.client._queries
+        good = asyncio.create_task(peer.client.ask(text='good', speak=False, timeout=2))
+        query = await peer.next('query')
+        assert query['text'] == 'good'
+        await peer.send({'type': 'response', 'turn': query['id'], 'text': 'ok'})
+        assert (await good).text == 'ok'
+
+
+@pytest.mark.asyncio
+async def test_a_hello_ack_with_null_server_does_not_break_responses():
+    async with connected() as peer:
+        peer.client.handshake = {**peer.client.handshake, 'server': None}
+        answer = asyncio.create_task(peer.client.ask(text='hi', timeout=2))
+        query = await peer.next('query')
+        await peer.send({'type': 'response', 'turn': query['id'], 'text': 'fine'})
+        assert (await answer).text == 'fine'

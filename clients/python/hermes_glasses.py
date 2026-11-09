@@ -91,7 +91,7 @@ class HermesGlassesClient:
     async def _write(self, ws, outbox):
         try:
             while True:
-                await ws.send_json(await outbox.get())
+                await ws.send_str(await outbox.get())
         except (aiohttp.ClientError, ConnectionError, RuntimeError):
             await ws.close()
 
@@ -191,7 +191,11 @@ class HermesGlassesClient:
     def _send(self, frame, handshake=False):
         if not self._socket or self._socket.closed or (not handshake and not self.ready):
             raise HermesGlassesError('Not connected.', 'disconnected')
-        self._outbox.put_nowait(frame)
+        try:  # serialise here: a frame that cannot be sent fails its caller, never the writer
+            data = json.dumps(frame)
+        except (TypeError, ValueError) as error:
+            raise HermesGlassesError(f'Frame cannot be sent: {type(error).__name__}.') from None
+        self._outbox.put_nowait(data)
 
     def _next_id(self):
         while True:
@@ -301,7 +305,7 @@ class HermesGlassesClient:
                 self._interrupts.remove(id)
             elif pending is not None and 'result' not in pending:
                 pending['result'] = TurnResult(id, frame.get('text'), pending.get('transcript'))
-                features = (self.handshake or {}).get('server', {}).get('features', [])
+                features = ((self.handshake or {}).get('server') or {}).get('features') or []
                 if self.device.get('capabilities', {}).get('audio_out') and pending['speak'] is not False and 'audio_out' in features:
                     pending['timer'] = asyncio.get_running_loop().call_later(15, self._finish, id)
                 else:
@@ -350,7 +354,8 @@ class HermesGlassesClient:
                 try:
                     result = self.on_capture_photo(frame.get('reason'))
                 except Exception:
-                    self.photo_error(frame.get('request'), 'Camera unavailable.')
+                    if self.ready:
+                        self.photo_error(frame.get('request'), 'Camera unavailable.')
                 else:
                     self._spawn(self._camera(frame, result, self._socket))
             self._emit(kind, frame)
