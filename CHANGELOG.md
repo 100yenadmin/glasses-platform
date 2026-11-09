@@ -2,6 +2,21 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.5.2 (2026-11-09): answer Hermes's questions from the G2 glasses
+
+- **G2: questions during a turn.** When Hermes asks a question in the middle of a G2 turn (its clarify tool), the
+  question shows on the lens at once. Tap to answer by voice, and the turn carries on. Before, the question waited
+  for the turn to finish, so the turn stalled until it timed out. If the answer is not heard, the question comes
+  back. An approval card still comes first. A question this device's own turn is not waiting on shows as an
+  ordinary push.
+- **`pair` says why there is no QR code.** If the `qrcode` package is missing from the plugin's environment, `pair`
+  says so and how to fix it (reinstall in a terminal and answer `y`), instead of printing only the URL.
+  `hermes plugins update glasses-platform` prepares newly declared dependencies (checked from 0.5.0 to 0.5.1).
+- **Errors name their query.** A v1 error that answers one query (such as "I couldn't hear that.") now carries
+  that query's id as `turn`, so a client with several queries in flight fails only that one. v0 frames are unchanged.
+- **xiaozhi simulator.** A reminder that plays on connect, or a spoken "couldn't hear that", no longer ends a
+  simulated voice turn early (test tooling only).
+
 ## 0.5.1 (2026-11-09): the pairing QR code on a fresh install
 
 `hermes glasses pair` printed only the connect URL on a fresh Hermes install: the plugin runs in Hermes's own

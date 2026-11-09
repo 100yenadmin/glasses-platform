@@ -47,7 +47,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
         page = 'list';
       });
     } else if (prompt) {
-      show('push', `Hermes asks\n${prompt.text}\nTap to answer`);
+      show('push', `${prompt.note ? prompt.note + '\n' : ''}Hermes asks\n${prompt.text}\nTap to answer`);
     } else if (pushing) {
       // A push is on the lens: its own timer shows the next one.
     } else if (!turn && !recording && pushes.length) {
@@ -80,14 +80,23 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     }
   }
   async function reply(query) {
-    // The wearer answers a question Hermes asked during the turn. Hermes folds the answer into the running turn,
-    // so the turn's final reply may come back on this ask or on the first one: whichever arrives ends both.
-    const own = chain; prompt = null; show('thinking', 'Thinking…');
+    // The wearer answers a question Hermes asked during the turn. Hermes folds a clarify answer into the running
+    // turn, so the turn's final reply may come back on this ask or on the first one: whichever arrives ends both.
+    // A spoken answer to a text approval gets its own short reply instead; the turn carries on with the first ask.
+    const own = chain, question = prompt, ends = question?.origin !== 'approval';
+    prompt = null; show('thinking', 'Thinking…');
     const mine = answering = (async () => {
-      try { settle(await client.ask({...query, speak: false, signal: own?.signal})); own?.abort(); }
-      catch (error) {
+      try {
+        const result = await client.ask({...query, speak: false, signal: own?.signal});
+        if (ends || !turn) { settle(result); own?.abort(); } else show('thinking', result.text || 'Thinking…');
+      } catch (error) {
         // A later question superseded this answer: Hermes replies on the latest one, so this timeout is expected.
-        if (error?.code !== 'aborted' && !(error?.code === 'timeout' && answering !== mine)) fail();
+        if (error?.code === 'aborted' || (error?.code === 'timeout' && answering !== mine)) return;
+        // Not heard (or another error for this answer alone): the turn still waits, so ask the question again.
+        if (turn && question && chain === own && error?.code !== 'timeout') {
+          prompt = {...question, note: error?.message || 'Try again.'};
+          if (!recording) next();
+        } else fail();
       }
     })();
     try { await mine; } finally { if (answering === mine) answering = null; }
@@ -144,7 +153,8 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
         approvals.push({...frame, choices: frame.choices}); next();
       });
       client.on('approval_closed', frame => dismiss(frame.id));
-      client.on('error', fail); client.on('disconnected', fail);
+      // An error that names its query is handled by that query's ask; only operation-wide errors show here.
+      client.on('error', frame => { if ((frame?.turn ?? frame?.id) === undefined) fail(); }); client.on('disconnected', fail);
       client.on('connected', () => { if (!turn && !recording && !approval) { show('answer', 'Tap to talk to Hermes'); next(); } });
       await client.connect(); show('answer', 'Tap to talk to Hermes');
     },

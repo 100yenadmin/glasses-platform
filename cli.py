@@ -123,8 +123,9 @@ def pair(args):
     if picture:
         print(picture + '\n')
     elif not (args.no_qr or xiaozhi):
-        print('(No QR code: the qrcode package is missing from the plugin\'s environment. Run '
-              '`hermes plugins update glasses-platform` and answer y, or use the URL below.)\n')
+        print('(No QR code: the qrcode package is missing from the plugin\'s environment. Use the URL below, or '
+              'reinstall in a terminal and answer y: `hermes plugins install 100yenadmin/glasses-platform --force '
+              f'--enable`, then `hermes glasses pair {user} {device} --replace` for a QR code with a new token.)\n')
     if xiaozhi:
         print(f'OTA address:\n  {url}\n')
         print('Paste it into the device Wi-Fi setup page: "OTA address" under advanced settings; then push to talk.')
