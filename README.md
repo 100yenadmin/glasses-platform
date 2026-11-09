@@ -2,16 +2,54 @@
 
 ![Hermes Glasses: your own Hermes agent, on your glasses](docs/media/banner.png)
 
-Plugin id and repository: `glasses-platform`.
+Your own Hermes agent on smart glasses and voice devices: it sees what you see, answers by voice, and reminds you.
 
-**Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
-answer. Reminders and long tasks can reach your glasses later.
+**[Watch the demo](https://x.com/ElectricSheepIO/status/2119822401361916227)**
 
-> **Status: v0.6.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
-> gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
-> `main`. Each device path below was run against a real Hermes gateway with a simulated device; no real glasses,
-> watch or voice box has been tested yet. Read the [design plan](docs/PLAN.md), the
-> [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
+[![Latest release](https://img.shields.io/github/v/release/100yenadmin/glasses-platform)](https://github.com/100yenadmin/glasses-platform/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Hermes >= 0.22.2](https://img.shields.io/badge/Hermes-%3E%3D%200.22.2-6f42c1)](https://hermes-agent.nousresearch.com)
+[![CI](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml)
+
+> **Status: v0.6.1 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
+> simulators and a real Hermes gateway with real models ([evidence](docs/evidence/M0-live-proof.md)); CI tests it on
+> Hermes v0.22.2, v0.23.0 and `main`. Each device path below was run against a real Hermes gateway with a simulated
+> device; no real glasses, watch, voice box or pendant has been tested yet.
+
+## Install
+
+```bash
+hermes plugins install 100yenadmin/glasses-platform --enable
+```
+
+In a terminal, answer `y` to install the `aiohttp` and `qrcode` dependencies; without a terminal add `--yes-deps`.
+(Without either, the plugin installs but stays disabled.) No API keys are needed. Needs Hermes Agent 0.22.2 or later
+with in-process plugin loading, which is the default; the opt-in `plugins.isolation: host` mode cannot load platform
+plugins.
+
+## Try it (no glasses needed, about two minutes)
+
+1. **Pair** a device. This makes a random token, saves it in the profile's `.env`, and prints a connect URL and QR code:
+   ```bash
+   hermes glasses pair            # device "glasses" for user "owner"
+   hermes gateway restart         # the gateway loads devices when it starts
+   ```
+2. **Talk** to your agent from the terminal as a pair of glasses with a camera:
+   ```bash
+   hermes glasses try
+   ```
+   Then type `What am I looking at?` or `Remind me in one minute to stretch.` An empty line quits.
+3. **What you will see:** `hermes  asks the glasses for a photo`, then `glasses  photo sent`, then your agent's
+   short answer about the sample photo (an airport). The reminder prints as a push a minute later (the agent
+   schedules it with its cron tool). Pass `--photo my.jpg` to show it your own picture.
+
+Photo answers need a model that can see: a main model that accepts images, or an `auxiliary.vision` model in
+`config.yaml`.
+
+**Before you pair a real device:** a device token is full access to your agent. It bypasses the gateway's user
+allowlist, chats as you, and can answer approval prompts and clarify questions. The listener is unencrypted and
+listens on all interfaces (port 8765) by default: set `GLASSES_HOST=127.0.0.1` to keep it local, and use Tailscale
+or a TLS reverse proxy away from your home network. Never post a connect URL or QR code; both carry the token.
 
 ## What it is
 
@@ -59,20 +97,7 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 
 Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
 
-## Install
-
-Requirements:
-- Hermes Agent 0.22.2 or later. The plugin needs `aiohttp` and `qrcode`, declared in `pyproject.toml`. Run the
-  install in a terminal and answer `y` when Hermes asks to prepare them; scripts add `--yes-deps`. Without either,
-  the plugin installs but stays disabled. `hermes plugins update glasses-platform` prepares newly declared
-  dependencies too (checked from 0.5.0 to 0.5.1).
-- In-process plugin loading, which is the default. The opt-in `plugins.isolation: host` mode cannot load platform plugins.
-
-```bash
-hermes plugins install https://github.com/100yenadmin/glasses-platform --enable
-```
-
-## Configure
+## Pair more devices
 
 Pair each device with one command. It creates a random token, saves it in the profile's `.env`, and prints the
 connect URL and a QR code to open in the glasses app:
@@ -125,7 +150,7 @@ Photo turns need a model that can see: either a main model that accepts images, 
 `config.yaml`.
 
 The plugin refuses to start without at least one token. It listens on all interfaces, port 8765, path `/voice`, by default.
-`GLASSES_HOST`, `GLASSES_PORT` and the other settings are listed in [docs/PLAN.md](docs/PLAN.md#6-configuration).
+Other settings are in [Settings and tools](#settings-and-tools).
 
 To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. The plugin does not terminate TLS.
 
@@ -176,25 +201,14 @@ a still-working message; the late answer is queued for your next question.
 Bobby's own widgets and actions (including watch timers and reminders) are unsupported. Hermes reminders appear
 as plain text with the next answer. This endpoint has aiohttp client tests; a real-watch session is still needed.
 
-## Try it
+## More ways to try it
 
 **A demo gateway:** `demo/run_demo_gateway.sh <empty-dir>` starts an isolated Hermes gateway with this plugin, a
 generated device token and only the vision, glasses, cronjob and memory toolsets (it uses the z.ai GLM coding plan;
 see the script's header).
 
-**From your terminal, in two minutes** (no glasses needed). `hermes glasses try` connects to your running gateway
-as a pair of glasses with a camera. Type what you would say; reminders and other pushes print when they arrive:
-
-```bash
-hermes glasses pair            # device "glasses" for user "owner"
-hermes gateway restart
-hermes glasses try             # then: "What am I looking at?", "Remind me in one minute to stretch."
-```
-
-The camera "sees" a sample airport photo; pass `--photo my.jpg` for your own. The plugin asks the glasses for a photo
-when you say something like "what am I looking at?", and the agent can take one itself with its
-`glasses_capture_photo` tool. For scripted runs, `sim/glasses_sim.py --url "<connect URL>" --say "..." --pretty`
-does the same without a prompt.
+For scripted runs, `sim/glasses_sim.py --url "<connect URL>" --say "..." --pretty` talks to a gateway without a
+prompt.
 
 **With the hermes-glasses iOS app** (untested so far): in the app, set Settings → Assistant → Backend to Bridge,
 and point it at `ws://<your-mac>.local:8765/voice?token=<token>`.
@@ -202,6 +216,33 @@ and point it at `ws://<your-mac>.local:8765/voice?token=<token>`.
 **Scheduled messages:** send them to your glasses with `--deliver glasses:<user>`, for example
 `hermes cron create "every day at 9am" "Brief me on today" --deliver glasses:me`. They arrive as pushes, or wait in a
 short offline queue until a device reconnects.
+
+## Settings and tools
+
+Set these in the profile's `.env` (or under `platforms.glasses.extra` in `config.yaml`), then restart the gateway.
+`hermes glasses pair` sets the device tokens for you.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `GLASSES_DEVICES` | none | Device tokens, `user:device=token,...`; all of one user's devices share one Hermes session |
+| `GLASSES_TOKEN` | none | Shorthand for one device, `owner:default` |
+| `GLASSES_HOST` / `GLASSES_PORT` | `0.0.0.0` / `8765` | Listener address; `127.0.0.1` keeps it on this machine |
+| `GLASSES_HOME_CHANNEL` | first user | Who gets `--deliver glasses` cron jobs and notifications |
+| `GLASSES_AUTO_CAPTURE` | `keywords` | Take a photo when you ask something like "what am I looking at?"; `off` leaves it to the agent |
+| `GLASSES_OUTBOX_PERSIST` | `on` | Keep pushes for offline devices in `$HERMES_HOME/glasses/outbox.json` across restarts |
+| `GLASSES_TURN_TIMEOUT` | `50` | Seconds an HTTP `POST /turn` waits before answering `pending` |
+| `GLASSES_OMI_WAIT` / `GLASSES_BOBBY_WAIT` | `20` / `45` | Seconds Omi and Pebble requests wait for the answer |
+| Speech and vision | Hermes's own | Voice uses Hermes's `stt` and `tts` settings; photos need a model that can see or an `auxiliary.vision` model |
+
+The full list, including photo timeout, frame size and outbox limits, is in [docs/PLAN.md](docs/PLAN.md#6-configuration).
+
+The agent gets three tools (toolset `glasses`) while it talks to a glasses user:
+
+| Tool | What it does |
+|---|---|
+| `glasses_capture_photo` | Takes a photo with the glasses camera and looks at it |
+| `glasses_show_text` | Shows text on the glasses display (up to 500 characters, optional seconds) |
+| `glasses_buzz` | Buzzes the glasses: `tap`, `double` or `long` |
 
 ## What it does on your machine
 
@@ -238,10 +279,6 @@ short offline queue until a device reconnects.
 - **A gateway platform** keeps one live session per person across all their devices. Cron and heartbeat results
   arrive as pushes, and replies stream to a heads-up display.
 
-## License
-
-MIT. See [LICENSE](LICENSE).
-
 ## Build a companion client
 
 The dependency-free [JavaScript client](clients/js/README.md) speaks protocol v1 over
@@ -249,3 +286,35 @@ WebSocket or HTTP, with injectable transports for phone runtimes. The
 [conformance kit](conformance/README.md) checks a server or runs a scripted local
 server for client authors. Planned server features still depend on the installed
 server's advertised capabilities.
+
+## Troubleshooting
+
+- **The plugin is installed but disabled.** Its dependencies were skipped.
+  Reinstall in a terminal and answer `y`: `hermes plugins install 100yenadmin/glasses-platform --force --enable`
+  (or add `--yes-deps` without a terminal).
+- **`pair` printed no QR code.** The `qrcode` package is missing from the plugin's environment. Reinstall as above,
+  then `hermes glasses pair <user> <device> --replace` for a QR code with a new token. The printed URL works meanwhile.
+- **The device cannot connect.** Restart the gateway after pairing (`hermes gateway restart`). Check that the phone
+  or device can reach this machine on port 8765 (same Wi-Fi, firewall, or `--host` with a Tailscale name), and that
+  a TLS proxy forwards WebSocket upgrades. A connection closed with code 4401 means a wrong or revoked token.
+- **The glasses platform does not start.** It refuses to start without at least one device token; run
+  `hermes glasses pair`, then restart the gateway.
+- **No spoken answers or recordings are not understood.** Speech uses Hermes's own `stt` and `tts` settings; check
+  them with any other voice channel. ESP32 voice boxes and Ogg or WAV devices also need `ffmpeg` on the gateway.
+- **Photo questions get no description.** Configure a model that can see (see [Try it](#try-it-no-glasses-needed-about-two-minutes)).
+
+## Report a bug
+
+[Open an issue](https://github.com/100yenadmin/glasses-platform/issues/new) with your Hermes version
+(`hermes --version`), the plugin version, the device and what happened. **Never paste a connect URL, QR code,
+`.env` line or log line that contains a device token**; replace the token with `<token>`. Revoke and re-pair any
+device whose token was shared (`hermes glasses revoke <user> <device>`).
+
+For a security problem, [report it privately](https://github.com/100yenadmin/glasses-platform/security/advisories/new)
+instead of opening a public issue.
+
+## Links
+
+[Releases](https://github.com/100yenadmin/glasses-platform/releases) ·
+[CHANGELOG](CHANGELOG.md) · [Roadmap](ROADMAP.md) · [Design plan](docs/PLAN.md) · [Device protocol](docs/PROTOCOL.md) ·
+[Contributing](CONTRIBUTING.md) · [License (MIT)](LICENSE)
