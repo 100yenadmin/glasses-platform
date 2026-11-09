@@ -114,8 +114,8 @@ to a device that declared `camera:false`.
 - A cron push carries the job's own text. Hermes's header (job name and id) and footer (how to stop the job) are
   removed, because devices read pushes aloud.
 - A device that is connected but has not settled its protocol holds new pushes until it does. If no device is live,
-  the server queues pushes (50 items, 24 h) and delivers them in order on the next connect. In M0 the queue is lost
-  on server restart.
+  the server queues pushes (50 items, 24 h) and delivers them in order on the next connect. Since 0.3.0 the queue
+  survives a server restart (`GLASSES_OUTBOX_PERSIST=off` turns that off).
 - Concurrent queries from one user are serialised by Hermes's session handling.
 
 ## Limits
