@@ -16,6 +16,26 @@ def pages(data):
     assert offset == len(data)
 
 
+def test_crc_matches_bitwise_reference_and_golden_page():
+    def bitwise(data):
+        crc = 0
+        for byte in data:
+            crc ^= byte << 24
+            for _ in range(8):
+                crc = ((crc << 1) ^ (0x04C11DB7 if crc & 0x80000000 else 0)) & 0xffffffff
+        return crc
+    # OpusHead page emitted by the original bitwise implementation in the round-trip test.
+    golden = bytes.fromhex('4f676753000200000000000000000100000000000000cf6e9af60113'
+                           '4f7075734865616401010000803e0000000000')
+    data = mux_opus([b'a' * 100, bytes(range(256)) * 4])
+    assert next(pages(data)) == golden
+    for page in [golden, *pages(data)]:
+        clear = bytearray(page)
+        expected = struct.unpack_from('<I', clear, 22)[0]
+        struct.pack_into('<I', clear, 22, 0)
+        assert crc32(clear) == bitwise(clear) == expected
+
+
 def test_mux_round_trip_crc_lacing_granules_and_headers():
     packets = [b'a' * 100, b'b' * 255, b'c' * 65025, b'd' * 70000, b'']
     data = mux_opus(packets)

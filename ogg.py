@@ -2,12 +2,21 @@
 import struct
 
 
+def _crc_entry(byte):
+    crc = byte << 24
+    for _ in range(8):
+        crc = ((crc << 1) ^ (0x04C11DB7 if crc & 0x80000000 else 0)) & 0xffffffff
+    return crc
+
+
+_CRC_TABLE = tuple(_crc_entry(byte) for byte in range(256))
+
+
 def crc32(data):
+    """Ogg CRC-32: polynomial 0x04C11DB7, no reflection, initial value zero."""
     crc = 0
     for byte in data:
-        crc ^= byte << 24
-        for _ in range(8):
-            crc = ((crc << 1) ^ (0x04C11DB7 if crc & 0x80000000 else 0)) & 0xffffffff
+        crc = ((crc << 8) & 0xffffffff) ^ _CRC_TABLE[(crc >> 24) ^ byte]
     return crc
 
 
