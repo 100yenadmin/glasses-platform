@@ -63,13 +63,18 @@ async def run(url='ws://127.0.0.1:8765/xiaozhi', token='', ota=None, wav=DEFAULT
 
             sender = asyncio.create_task(upload())
             reply = []
+            # A reminder queued while the device was away plays first, with its own `tts stop`. In upload mode
+            # the run ends only on the `tts stop` that follows this recording's `stt` frame.
+            asked = text_only
             try:
                 async with asyncio.timeout(timeout):
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             frame = json.loads(msg.data)
                             emit(json.dumps(frame))
-                            if frame.get('type') == 'tts' and frame.get('state') == 'stop':
+                            if frame.get('type') == 'stt' and not asked:
+                                asked, reply = True, []
+                            elif frame.get('type') == 'tts' and frame.get('state') == 'stop' and asked:
                                 return 0
                         elif msg.type == aiohttp.WSMsgType.BINARY:
                             reply.append(msg.data)

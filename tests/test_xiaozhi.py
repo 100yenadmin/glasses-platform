@@ -589,6 +589,30 @@ async def test_simulator_round_trip_against_fake_adapter(server, monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_simulator_waits_past_a_queued_reminder_for_its_own_answer(server, monkeypatch, tmp_path):
+    """#45: the reminder played on connect ends with its own `tts stop`; the run must still send its query."""
+    adapter, client = server
+    spec = importlib.util.spec_from_file_location('xiaozhi_reminder_sim', Path(__file__).resolve().parents[1] / 'sim/xiaozhi_sim.py')
+    sim = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sim)
+    adapter.outbox.append('alice', 'reminder', 'cron', 'p')
+    monkeypatch.setattr(xz, 'AUDIO_TIMEOUT', 0.01)
+    captured = []
+    async def fake_query(conn, frame):
+        captured.append(frame['id'])
+        await conn.send_json({'type': 'transcript', 'turn': frame['id'], 'text': 'hello'})
+        await conn.send_json({'type': 'response', 'turn': frame['id'], 'text': 'reply'})
+    monkeypatch.setattr(adapter, '_process_query', fake_query)
+    monkeypatch.setattr(sim, 'wav_packets', AsyncMock(return_value=[SPEECH, QUIET]))
+    frames = []
+    assert await sim.run(ota=str(client.make_url('/xiaozhi/ota/tok-alice-1')), out=tmp_path / 'reply.ogg',
+                         timeout=3, emit=lambda s: frames.append(json.loads(s))) == 0
+    texts = [f.get('text') for f in frames if f.get('state') == 'sentence_start']
+    assert captured and texts == ['reminder', 'reply']
+    assert frames[-1] == {**frames[-1], 'type': 'tts', 'state': 'stop'}
+
+
+@pytest.mark.asyncio
 async def test_simulator_text_only_receives_reminder_without_upload(server, monkeypatch, tmp_path):
     adapter, client = server
     spec = importlib.util.spec_from_file_location('xiaozhi_text_sim', Path(__file__).resolve().parents[1] / 'sim/xiaozhi_sim.py')
