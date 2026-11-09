@@ -45,7 +45,10 @@ export class HermesGlassesClient {
         if (ws === this.socket && !this.ready) ws.close();
       }, 10000);
     } catch {
-      this.lost({code: 0, reason: 'Could not open WebSocket.'});
+      this.closed = true;
+      this.connectionWait?.reject(new Error('Invalid WebSocket URL or implementation.'));
+      this.connectionWait = this.connecting = null;
+      this.emit('error', {type: 'error', message: 'Invalid WebSocket URL or implementation.'});
     }
     return result;
   }
@@ -55,8 +58,7 @@ export class HermesGlassesClient {
     const error = new Error('Disconnected.');
     this.connectionWait?.reject(error);
     this.connectionWait = this.connecting = null;
-    for (const pending of this.queries.values()) { clearTimeout(pending.timer); pending.reject(error); }
-    this.queries.clear();
+    for (const id of this.queries.keys()) this.finish(id, error);
     for (const pending of this.approvals.values()) pending.reject(error);
     this.approvals.clear();
     this.resetWait?.reject(error);
@@ -78,21 +80,30 @@ export class HermesGlassesClient {
       throw new Error('Not connected.');
     this.socket.send(JSON.stringify(frame));
   }
-  ask({text = '', audio, image, speak, id = `q${++this.sequence}`} = {}) {
+  ask({text = '', audio, image, speak, id = `q${++this.sequence}`, timeout, signal} = {}) {
     if (typeof id !== 'string' || !id || this.queries.has(id))
       return Promise.reject(new Error('Query id must be a unique nonempty string.'));
     return new Promise((resolve, reject) => {
-      this.queries.set(id, {resolve, reject, speak});
+      const abort = () => this.finish(id, Object.assign(new Error('Query aborted.'), {code: 'aborted'}));
+      const pending = {resolve, reject, speak, slash: !audio && text.trim().startsWith('/'), signal, abort};
+      this.queries.set(id, pending);
+      if (signal?.aborted) { abort(); return; }
+      signal?.addEventListener('abort', abort, {once: true});
+      if (timeout !== undefined) pending.deadline = setTimeout(() =>
+        this.finish(id, Object.assign(new Error('Query timed out.'), {code: 'timeout'})), timeout);
       try { this.send({type: 'query', id, text, audio, image, speak}); }
-      catch (error) { this.queries.delete(id); reject(error); }
+      catch (error) { this.finish(id, error); }
     });
   }
-  finish(id) {
+  finish(id, error) {
     const pending = this.queries.get(id);
-    if (!pending?.result) return;
+    if (!pending || (!pending.result && !error)) return;
     clearTimeout(pending.timer);
+    clearTimeout(pending.deadline);
+    pending.signal?.removeEventListener('abort', pending.abort);
     this.queries.delete(id);
-    pending.resolve(pending.result);
+    if (error) pending.reject(error);
+    else pending.resolve(pending.result);
   }
   newSession() {
     if (this.resetWait) return this.resetWait.promise;
@@ -104,7 +115,11 @@ export class HermesGlassesClient {
     if (this.resetWait) this.resetWait.promise = promise;
     return promise;
   }
-  interrupt(id) { this.send({type: 'interrupt', id}); }
+  interrupt(id) {
+    this.send({type: 'interrupt', id});
+    const stopped = id ?? [...this.queries].find(([, query]) => !query.result && !query.slash)?.[0];
+    this.finish(stopped, Object.assign(new Error('Query interrupted.'), {code: 'interrupted'}));
+  }
   answerApproval(id, choice) {
     if (this.approvals.has(id)) return Promise.reject(new Error('Approval answer already pending.'));
     return new Promise((resolve, reject) => {
@@ -133,9 +148,15 @@ export class HermesGlassesClient {
         break;
       case 'response':
         if (!pending || pending.result) break;
+        if (!pending.slash) for (const [earlier, query] of this.queries) {
+          if (earlier === id) break;
+          if (!query.result) this.finish(earlier,
+            Object.assign(new Error('Query superseded by a later ask.'), {code: 'superseded'}));
+        }
         pending.result = {id, text: frame.text};
         if (pending.transcript !== undefined) pending.result.transcript = pending.transcript;
-        if (this.device.capabilities?.audio_out?.length && pending.speak !== false)
+        if (this.device.capabilities?.audio_out?.length && pending.speak !== false &&
+            this.handshake?.server?.features?.includes('audio_out'))
           pending.timer = setTimeout(() => this.finish(id), 15000);
         else this.finish(id);
         break;
@@ -158,11 +179,12 @@ export class HermesGlassesClient {
         // Uncorrelated errors are operation-wide; never guess which concurrent query failed.
         const error = new Error(frame.message || 'Server error.');
         const correlated = frame.turn ?? frame.id;
+        const hadQueries = this.queries.size > 0;
         const entries = correlated === undefined ? [...this.queries] : [[correlated, this.queries.get(correlated)]];
         for (const [key, query] of entries) if (query) {
-          clearTimeout(query.timer); query.reject(error); this.queries.delete(key);
+          this.finish(key, query.result ? undefined : error);
         }
-        if (correlated === undefined) { this.resetWait?.reject(error); this.resetWait = null; }
+        if (correlated === undefined && !hadQueries) { this.resetWait?.reject(error); this.resetWait = null; }
         this.emit('error', frame);
         break;
       }
@@ -173,10 +195,16 @@ export class HermesGlassesClient {
         if (this.device.capabilities?.ack) this.send({type: 'ack', id: frame.id});
         this.emit('push', frame); break;
       case 'capture_photo':
-        this.emit('capture_photo', frame);
-        if (this.onCapturePhoto) Promise.resolve().then(() => this.onCapturePhoto(frame.reason))
-          .then(data => this.sendPhoto(frame.request, data))
-          .catch(() => { if (this.ready) this.photoError(frame.request, 'Camera unavailable.'); });
+        if (this.onCapturePhoto) {
+          const failure = () => { if (this.ready) this.photoError(frame.request, 'Camera unavailable.'); };
+          try {
+            Promise.resolve(this.onCapturePhoto(frame.reason)).then(data => {
+              if (typeof data !== 'string') throw new Error('Invalid photo.');
+              this.sendPhoto(frame.request, data);
+            }).catch(failure);
+          } catch { failure(); }
+        }
+        try { this.emit('capture_photo', frame); } catch { /* Listener failures must not stop camera replies. */ }
         break;
       case 'approval_request': case 'approval_closed': case 'display': case 'haptic':
         this.emit(frame.type, frame); break;
@@ -196,7 +224,7 @@ export class HermesGlassesHttp {
       ...(body === undefined ? {} : {body: JSON.stringify(body)})
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return textPlain ? response.text() : response.json();
+    return textPlain ? {status: response.status === 202 ? 'pending' : 'done', text: await response.text()} : response.json();
   }
   turn(body, {textPlain = false} = {}) { return this.request('/turn', body, textPlain); }
   pending(wait = 25) { return this.request(`/pending?wait=${encodeURIComponent(wait)}`); }

@@ -13,13 +13,14 @@ class Socket {
   close(code = 1000) { this.readyState = 3; this.onclose({code}); }
 }
 function setup(options = {}) {
+  const {serverFeatures = [], ...clientOptions} = options;
   const client = new HermesGlassesClient({url: 'ws://localhost/voice?extra=1', token: 'fixture & token',
-    device: {name: 'test', capabilities: {}}, reconnect: false, WebSocketImpl: Socket, ...options});
+    device: {name: 'test', capabilities: {}}, reconnect: false, WebSocketImpl: Socket, ...clientOptions});
   const connected = client.connect();
   const socket = Socket.instances.at(-1);
   socket.frame({type: 'welcome', protocol_max: 1});
   socket.frame({type: 'hello_ack', protocol: 1, user: 'fixture', device: 'test',
-    server: {version: 'fixture', features: []}});
+    server: {version: 'fixture', features: serverFeatures}});
   return {client, socket, connected};
 }
 
@@ -75,8 +76,8 @@ test('URL encoding, first-frame hello, correlation, cumulative delta and unknown
   socket.onmessage({data: '[]'});
   socket.onmessage({data: '{'});
   socket.frame({type: 'response_delta', turn: 'two', text: 'cumulative', future: true});
-  socket.frame({type: 'response', turn: 'two', text: 'second', final: true});
   socket.frame({type: 'response', turn: 'one', text: 'first', final: true});
+  socket.frame({type: 'response', turn: 'two', text: 'second', final: true});
   assert.deepEqual(await one, {id: 'one', text: 'first'});
   assert.deepEqual(await two, {id: 'two', text: 'second'});
   assert.equal(seen[0].id, 'two');
@@ -97,14 +98,19 @@ test('errors and disconnect reject operations, duplicate ids do not overwrite', 
   await assert.rejects(client.ask({text: 'offline'}), /Not connected/);
 });
 
-test('uncorrelated errors reject queries and reset; repeated reset shares one request', async () => {
+test('uncorrelated query errors preserve reset; reset-only errors reject it', async () => {
   const {client, socket} = setup();
   const query = assert.rejects(client.ask({id: 'one'}), /empty/);
   const resetPromise = client.newSession();
   assert.equal(resetPromise, client.newSession());
-  const reset = assert.rejects(resetPromise, /empty/);
   socket.frame({type: 'error', message: 'empty'});
-  await Promise.all([query, reset]);
+  await query;
+  assert.ok(client.resetWait);
+  socket.frame({type: 'session_reset'});
+  await resetPromise;
+  const reset = assert.rejects(client.newSession(), /reset failed/);
+  socket.frame({type: 'error', message: 'reset failed'});
+  await reset;
   client.interrupt('stop');
   assert.deepEqual(socket.sent.at(-1), {type: 'interrupt', id: 'stop'});
   client.disconnect();
@@ -112,7 +118,8 @@ test('uncorrelated errors reject queries and reset; repeated reset shares one re
 
 test('audio timeout returns text, speak false skips wait, push audio is emitted', async t => {
   t.mock.timers.enable({apis: ['setTimeout']});
-  const {client, socket} = setup({device: {name: 'audio', capabilities: {audio_out: ['audio/wav']}}});
+  const {client, socket} = setup({serverFeatures: ['audio_out'],
+    device: {name: 'audio', capabilities: {audio_out: ['audio/wav']}}});
   const query = client.ask({id: 'missing'});
   socket.frame({type: 'response', turn: 'missing', text: 'text'});
   let finished = false;
@@ -169,8 +176,10 @@ test('HTTP: Bearer, plain text, JSON, pending 202, approval and errors', async (
   assert.deepEqual(await http.turn({text: 'hello'}), {status: 'pending'});
   assert.equal(calls[0].headers.Authorization, 'Bearer fixture');
   assert.equal(calls[0].body, '{"text":"hello"}');
-  assert.equal(await http.turn({text: 'hello'}, {textPlain: true}), 'plain');
+  assert.deepEqual(await http.turn({text: 'hello'}, {textPlain: true}), {status: 'pending', text: 'plain'});
   assert.equal(calls.at(-1).headers.Accept, 'text/plain');
+  status = 200;
+  assert.deepEqual(await http.turn({text: 'hello'}, {textPlain: true}), {status: 'done', text: 'plain'});
   await http.pending(0);
   assert.equal(calls.at(-1).url, 'http://localhost/pending?wait=0');
   assert.equal(calls.at(-1).method, 'GET');
@@ -178,4 +187,121 @@ test('HTTP: Bearer, plain text, JSON, pending 202, approval and errors', async (
   assert.equal(calls.at(-1).body, '{"id":"a","choice":"deny"}');
   status = 401;
   await assert.rejects(http.pending(), /HTTP 401/);
+});
+
+test('folded asks are superseded in send order without stale status ids', async t => {
+  const {client, socket} = setup();
+  t.after(() => client.disconnect());
+  const first = client.ask({id: 'first', text: 'one'}).catch(error => error);
+  const middle = client.ask({id: 'middle', text: 'two'}).catch(error => error);
+  const last = client.ask({id: 'last', text: 'three'});
+  const slash = client.ask({id: 'slash', text: ' /status'});
+  socket.frame({type: 'response', turn: 'slash', text: 'working'});
+  assert.equal((await slash).text, 'working');
+  assert.equal(client.queries.size, 3, 'slash replies do not supersede ordinary asks');
+  socket.frame({type: 'response', turn: 'last', text: 'latest'});
+  assert.equal(client.queries.size, 0);
+  for (const error of await Promise.all([first, middle])) {
+    assert.ok(error instanceof Error);
+    assert.equal(error.code, 'superseded');
+    assert.match(error.message, /superseded/i);
+  }
+  assert.equal((await last).text, 'latest');
+  let status;
+  client.on('status', frame => { status = frame; });
+  socket.frame({type: 'status', state: 'idle'});
+  assert.equal(status.id, undefined);
+});
+
+test('interrupt rejects the stopped ask and removes its entry', async t => {
+  const {client, socket} = setup();
+  t.after(() => client.disconnect());
+  for (const explicit of [true, false]) {
+    const answer = client.ask({id: 'stop', text: 'hello'}).catch(error => error);
+    client.interrupt(explicit ? 'stop' : undefined);
+    assert.equal(client.queries.size, 0);
+    assert.equal((await answer).code, 'interrupted');
+    assert.equal(socket.sent.at(-1).type, 'interrupt');
+  }
+});
+
+test('ask timeout and AbortSignal settle and clean up without disconnecting', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const {client, socket} = setup();
+  t.after(() => client.disconnect());
+  const timed = client.ask({id: 'timed', timeout: 20}).catch(error => error);
+  t.mock.timers.tick(20);
+  assert.equal(client.queries.size, 0);
+  assert.equal((await timed).code, 'timeout');
+  const controller = new AbortController();
+  const aborted = client.ask({id: 'aborted', signal: controller.signal}).catch(error => error);
+  controller.abort();
+  assert.equal(client.queries.size, 0);
+  assert.equal((await aborted).code, 'aborted');
+  const sent = socket.sent.length;
+  const already = client.ask({signal: controller.signal}).catch(error => error);
+  assert.equal(client.queries.size, 0);
+  assert.equal((await already).code, 'aborted');
+  assert.equal(socket.sent.length, sent);
+  const completed = client.ask({id: 'ok', timeout: 20, signal: new AbortController().signal});
+  socket.frame({type: 'response', turn: 'ok', text: 'ok'});
+  await completed;
+  t.mock.timers.tick(20);
+  assert.equal(client.ready, true);
+});
+
+test('uncorrelated errors resolve text already received and preserve an in-flight reset', async t => {
+  const {client, socket} = setup({serverFeatures: ['audio_out'],
+    device: {name: 'audio', capabilities: {audio_out: ['audio/wav']}}});
+  t.after(() => client.disconnect());
+  const completed = client.ask({id: 'text'}).catch(error => error);
+  socket.frame({type: 'response', turn: 'text', text: 'kept'});
+  const waiting = client.ask({id: 'waiting'}).catch(error => error);
+  const reset = client.newSession().catch(error => error);
+  socket.frame({type: 'error', message: 'query failed'});
+  assert.deepEqual(await completed, {id: 'text', text: 'kept'});
+  assert.match((await waiting).message, /query failed/);
+  assert.ok(client.resetWait);
+  socket.frame({type: 'session_reset'});
+  assert.equal((await reset).type, 'session_reset');
+});
+
+test('audio wait requires server audio_out feature', async t => {
+  const {client, socket} = setup({device: {name: 'audio', capabilities: {audio_out: ['audio/wav']}}});
+  t.after(() => client.disconnect());
+  const answer = client.ask({id: 'no-audio'});
+  socket.frame({type: 'response', turn: 'no-audio', text: 'ready'});
+  assert.equal(client.queries.size, 0);
+  assert.equal((await answer).text, 'ready');
+});
+
+test('camera handler runs before throwing event listeners; invalid camera results send photo_error', async t => {
+  for (const result of ['base64', undefined, 123, new Error('camera detail')]) {
+    const order = [];
+    const {client, socket} = setup({onCapturePhoto: () => {
+      order.push('handler');
+      if (result instanceof Error) throw result;
+      return result;
+    }});
+    t.after(() => client.disconnect());
+    client.on('capture_photo', () => { order.push('event'); throw new Error('listener'); });
+    assert.doesNotThrow(() => socket.frame({type: 'capture_photo', request: 'photo', reason: 'tool'}));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(order, ['handler', 'event']);
+    assert.equal(socket.sent.at(-1).type, typeof result === 'string' ? 'photo' : 'photo_error');
+  }
+});
+
+test('invalid URL rejects and emits once with no reconnect timer', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const client = new HermesGlassesClient({url: 'not a URL', token: 'fixture', reconnect: true,
+    device: {name: 'fixture'}, WebSocketImpl: Socket});
+  t.after(() => client.disconnect());
+  let errors = 0;
+  client.on('error', () => { errors++; });
+  await assert.rejects(client.connect(), /URL/i);
+  assert.equal(errors, 1);
+  assert.equal(client.retryTimer, undefined);
+  t.mock.timers.tick(60000);
+  assert.equal(errors, 1);
 });

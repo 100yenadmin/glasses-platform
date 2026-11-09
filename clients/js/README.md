@@ -15,9 +15,9 @@ console.log(answer.text);
 client.disconnect();
 ```
 
-Even Hub web apps can import this same module. Pebble phone-side runtimes that do not
-provide standard WebSocket/fetch can inject `WebSocketImpl` or `fetchImpl` through a
-platform shim; the shim must implement the interfaces in `hermes-glasses.d.ts`.
+Even Hub web apps should be able to import this module (untested). Pebble phone-side
+runtimes should work with an injected `WebSocketImpl` or `fetchImpl` platform shim
+(untested); it must implement the interfaces in `hermes-glasses.d.ts`.
 This is a protocol library, not a hardware bridge. Browser builds need no bundler.
 
 Register `client.onCapturePhoto = async reason => base64Jpeg` for automatic camera
@@ -33,32 +33,43 @@ removes it. Events: `connected`, `disconnected`, `push`, `approval_request`,
 `transcript`, `error`. Delta text is cumulative: replace the displayed preview.
 `delta` and `transcript` include `id` from `turn`. The protocol's `status` has no
 turn id; `id` is inferred only while exactly one query is outstanding. Uncorrelated
-server errors reject all outstanding queries and a pending reset; correlated error
-extensions reject only their matching query. No new correlation fields are sent.
+server errors resolve queries that already have text and reject queries without text.
+A pending reset is rejected only when no query is in flight; correlated error
+extensions affect only their matching query. No new correlation fields are sent.
 
 Each `ask` uses a unique id. Responses resolve with `{id, text, transcript?, audio?}`.
-Devices declaring `audio_out` wait at most 15 seconds after text for audio; missing
+Devices declaring `audio_out` wait at most 15 seconds after text for audio when the
+server also advertises `audio_out` in its features; missing
 speech still resolves the text. `speak:false` skips that wait. `audio` events also
 include push audio. Unknown types/fields are ignored. Disconnect rejects pending
 operations; queries are never replayed. Reconnect uses jittered exponential backoff
 from 1 to 30 seconds and repeats hello; 4401 stops retries. `disconnect()` stops
-retries. `newSession()` coalesces simultaneous resets because session_reset has no id.
-A query folded by Hermes into another turn may receive only `status idle`, as
-specified by the protocol; that does not resolve its ask promise. Applications
-should avoid overlapping asks and use disconnect to cancel outstanding work.
+retries. Invalid URLs reject and emit an error once without retrying.
+`newSession()` coalesces simultaneous resets because session_reset has no id.
+Replies to ordinary queries arrive in send order. When Hermes folds asks into a
+later turn, its response rejects earlier unanswered asks with an Error whose
+message says superseded and whose `code` is `superseded`. Slash-command replies do
+not supersede asks. `interrupt(id)` rejects that ask with `code: 'interrupted'`;
+without an id it rejects the oldest unanswered ordinary ask.
+`ask({text, timeout: 10000, signal: controller.signal})` adds a total timeout in ms
+and/or AbortSignal cancellation (`code: 'timeout'` / `'aborted'`). These cancel the
+local wait; use `interrupt()` to send a stop to Hermes. Neither option is required.
 
 For platforms without a socket:
 
 ```js
 const http = new HermesGlassesHttp({baseUrl: 'http://localhost:8765', token: deviceToken});
 const reply = await http.turn({text: 'Hello'});
-const text = await http.turn({text: 'Hello'}, {textPlain: true});
+const {status, text} = await http.turn({text: 'Hello'}, {textPlain: true});
 const {items} = await http.pending(25);
 await http.approval(promptId, selectedChoice);
 ```
 
 HTTP helpers send Bearer authentication, preserve pending/needs_answer bodies (202
-is successful), and throw on non-success status codes. WebSockets use a URL token;
+is successful), and throw on non-success status codes. Text mode returns
+`{status, text}`, mapping HTTP 202 to `pending` and other success codes to `done`.
+The server HTTP routes must ship in the same release as these helpers.
+WebSockets use a URL token;
 keep connect URLs out of logs and use HTTPS/WSS away from localhost. Socket and fetch
 implementations must provide the standard browser API surface (or a matching shim).
 

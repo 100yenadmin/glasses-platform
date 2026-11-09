@@ -3,7 +3,10 @@ export interface Capabilities {
   audio_out?: string[]; buttons?: boolean; haptics?: boolean; ack?: boolean;
 }
 export interface Media { data: string; mime: string; rate?: number }
-export interface Query { text?: string; audio?: Media; image?: Media; speak?: boolean; id?: string }
+export interface Query {
+  text?: string; audio?: Media; image?: Media; speak?: boolean; id?: string;
+  timeout?: number; signal?: AbortSignal;
+}
 export interface Frame { type?: string; [field: string]: unknown }
 export interface HelloAck extends Frame {
   protocol: number; user: string; device: string;
@@ -23,14 +26,14 @@ export interface ClientOptions {
   device: {name: string; model?: string; capabilities: Capabilities};
   app?: {name: string; version: string}; reconnect?: boolean;
   WebSocketImpl?: new (url: string) => WebSocketLike;
-  onCapturePhoto?: (reason: string) => Promise<string>;
+  onCapturePhoto?: (reason: string) => string | Promise<string>;
 }
 export type ClientEvent = 'connected' | 'disconnected' | 'push' | 'approval_request' |
   'approval_closed' | 'capture_photo' | 'display' | 'haptic' | 'audio' | 'status' | 'delta' |
   'transcript' | 'error';
 export class HermesGlassesClient {
   constructor(options: ClientOptions);
-  onCapturePhoto?: (reason: string) => Promise<string>;
+  onCapturePhoto?: (reason: string) => string | Promise<string>;
   on(type: ClientEvent, listener: (frame: Frame) => void): () => void;
   off(type: ClientEvent, listener: (frame: Frame) => void): void;
   connect(): Promise<HelloAck>;
@@ -55,7 +58,7 @@ export type FetchImpl = (url: string, init: {
 }) => Promise<FetchResponse>;
 export class HermesGlassesHttp {
   constructor(options: {baseUrl: string; token: string; fetchImpl?: FetchImpl});
-  turn(body: HttpTurn, options: {textPlain: true}): Promise<string>;
+  turn(body: HttpTurn, options: {textPlain: true}): Promise<{status: 'done' | 'pending'; text: string}>;
   turn(body: HttpTurn, options?: {textPlain?: false}): Promise<HttpResult>;
   pending(wait?: number): Promise<{items: Frame[]}>;
   approval(id: string, choice: string): Promise<Frame>;
