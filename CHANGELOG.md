@@ -6,7 +6,7 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 
 - **JavaScript client** (`clients/js/hermes-glasses.js`): a dependency-free protocol v1 client for browsers, phones
   and web views, with connect and reconnect, asks with timeouts, interrupts, approvals and photos. The G2 app uses it.
-- **Conformance kit** (`python -m glasses_plugin.conformance`): `check-server` tests any gateway against the protocol;
+- **Conformance kit** (`python -m conformance` from the repo root): `check-server` tests any gateway against the protocol;
   a fake server tests a client.
 - **Omi pendant.** Say “Hey Hermes, …” in a live Omi conversation to ask your agent through
   `POST /omi/{token}/transcript`. Answers, reminders and approval prompts return as Omi notifications; slow

@@ -14,7 +14,7 @@ could connect to the plugin, how, and what is blocking them. Every row comes fro
   person's devices, and the offline queue.
 - Devices differ in two ways: what they can do (camera, display, speaker, mic, buttons, haptics) and how they
   connect. The plugin supports three ways of connecting: the WebSocket protocol (today), an HTTP route for devices
-  that cannot hold a WebSocket (today, 0.4.0), and compatible endpoints for existing device firmware (planned).
+  that cannot hold a WebSocket (today, 0.4.0), and compatible endpoints for existing device firmware (0.5.0: xiaozhi, Omi, Bobby).
 
 ## Glasses
 

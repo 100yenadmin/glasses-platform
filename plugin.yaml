@@ -9,8 +9,10 @@ description: >
   by voice. Pair a device with one command (`hermes glasses pair`) or try it from the terminal (`hermes glasses try`).
   A hardware-independent channel: WebSocket for glasses (legacy and v1 clients, voice in and out, approval
   buttons) and HTTP routes for devices that cannot keep a socket open (Apple Watch Siri Shortcut, scripts).
-  Disclosure — listens on a network port (WebSocket /voice and HTTP /turn, /pending, /approval); device tokens grant
-  full agent access; `hermes glasses pair` writes device tokens to the profile .env; pushes waiting for an offline
+  Also ESP32 xiaozhi voice boxes, the Omi pendant (transcript webhook) and Pebble watches (the Bobby app).
+  Disclosure — listens on a network port (WebSockets /voice, /xiaozhi and /bobby/<token>/query; HTTP /turn,
+  /pending, /approval, /xiaozhi/ota/<token>, /omi/<token>/transcript and /bobby/<token>/quota); device tokens grant
+  full agent access, sent in a header, query or URL path; with Omi, transcripts and answers pass through Omi's servers; `hermes glasses pair` writes device tokens to the profile .env; pushes waiting for an offline
   device are kept in $HERMES_HOME/glasses/outbox.json (owner-only); photos and recordings are cached by Hermes;
   speech uses Hermes's own stt/tts settings (a cloud provider receives the audio or text); runs a local ffmpeg
   (no shell) only to convert audio.
@@ -50,5 +52,17 @@ optional_env:
   - name: GLASSES_PUSH_HOLD_SECONDS
     description: "Longest a push waits for a v0 device's pending answer (default 120)"
     prompt: "v0 push hold (seconds)"
+    password: false
+  - name: GLASSES_OMI_WAIT
+    description: "Seconds an Omi webhook call waits for the answer before it is queued for the next call (default 20)"
+    prompt: "Omi wait (seconds)"
+    password: false
+  - name: GLASSES_BOBBY_WAIT
+    description: "Seconds a Pebble (Bobby) question waits for the answer before a still-working reply (default 45)"
+    prompt: "Pebble wait (seconds)"
+    password: false
+  - name: GLASSES_XIAOZHI_URL
+    description: "WebSocket URL the xiaozhi OTA reply gives voice boxes, when a proxy changes it (default: this host's /xiaozhi)"
+    prompt: "xiaozhi WebSocket URL"
     password: false
 provides_tools: [glasses_capture_photo, glasses_show_text, glasses_buzz]
