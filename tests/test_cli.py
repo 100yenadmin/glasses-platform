@@ -115,3 +115,10 @@ def test_revoking_the_last_device_never_brings_back_yaml_devices(home, capsys):
     assert run('revoke', 'alice', 'old') == 0
     assert 'config.yaml still lists it' in capsys.readouterr().out
     assert [i.device for i in stored().values()] == ['new']
+
+
+def test_pair_prints_no_url_when_the_env_write_is_refused(home, capsys, monkeypatch):
+    monkeypatch.setattr('hermes_cli.config.save_env_value', lambda key, value: None)  # a managed install's refusal
+    assert run('pair', 'alice', 'rayban', '--no-qr') == 1
+    out = capsys.readouterr().out
+    assert 'token=' not in out and 'Nothing was paired' in out
