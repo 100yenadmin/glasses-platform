@@ -1,6 +1,6 @@
 # Glasses device protocol (v0 and v1)
 
-Status: **v1, extended in M1 and M4** (sections marked *planned* are specified but not yet released). This is the contract between a glasses companion app and the `glasses` Hermes platform.
+Status: **v1, extended in 0.4.0** (sections marked *planned* are specified but not yet released). This is the contract between a glasses companion app and the `glasses` Hermes platform.
 
 - **Transport:** one WebSocket per device at `ws(s)://<host>:<port><path>`. The default is `:8765/voice`.
 - **Frames:** UTF-8 JSON text frames, each an object with a `type` field. Binary data (photos, audio) travels
@@ -65,18 +65,18 @@ Status: **v1, extended in M1 and M4** (sections marked *planned* are specified b
 ```
 
 `server.version` is the plugin's real version and `server.features` lists what this server supports, so a client
-can hide controls the server cannot use. See [Capabilities](#capabilities-planned) for what each capability changes.
+can hide controls the server cannot use. See [Capabilities](#capabilities) for what each capability changes.
 
 ### Client → server
 
 | Frame | Fields | Meaning |
 |---|---|---|
-| `query` | `id`, `text`, `image?` `{data, mime}`, `audio?` `{data, mime, rate?}`, `speak?`, `tts?` | Like v0, plus an optional inline photo, a client turn id, and *planned:* spoken audio instead of `text` (see [Voice](#voice-planned)) |
+| `query` | `id`, `text`, `image?` `{data, mime}`, `audio?` `{data, mime, rate?}`, `speak?`, `tts?` | Like v0, plus an optional inline photo, a client turn id, and spoken audio instead of `text` (see [Voice](#voice)) |
 | `photo` | `request`, `data`, `mime?` | Answer to `capture_photo` with the same `request` id |
 | `photo_error` | `request`, `message?` | — |
 | `interrupt` | `id?` | Stop the current turn: handled as a `query` with the text `/stop` (and this string `id`, if given), so its `response` carries Hermes' confirmation |
-| `approval_response` | `id`, `choice` | *Planned.* A button answer to `approval_request` (see [Approvals with buttons](#approvals-with-buttons-planned)) |
-| `ack` | `id` | *Planned.* Push received (only from devices that declared `ack:true`; see [Acknowledgements](#acknowledgements-planned)) |
+| `approval_response` | `id`, `choice` | A button answer to `approval_request` (see [Approvals with buttons](#approvals-with-buttons)) |
+| `ack` | `id` | Push received (only from devices that declared `ack:true`; see [Acknowledgements](#acknowledgements)) |
 
 ### Server → client
 
@@ -87,13 +87,13 @@ can hide controls the server cannot use. See [Capabilities](#capabilities-planne
 | `response` | `turn`, `text`, `final:true`, `tts` | The authoritative reply: exactly one per `query`, sent when Hermes finishes the turn |
 | `push` | `id`, `origin`, `text` | Out-of-turn message, fanned out to all of the user's live devices. `origin`: `message`, `cron`, `approval` (a command approval, asked as a yes/no question), `clarify` (a question from the agent), `reply` (the reply to a query whose device went offline). Others may be added. |
 | `capture_photo` | `request`, `reason` (`keyword`/`tool`) | Photo request |
-| `approval_request` | `id`, `text`, `command`, `description`, `choices` | *Planned.* A command approval, to devices that declared `buttons:true` |
-| `approval_result` | `id`, `ok`, `choice?`, `message` | *Planned.* The answer to this device's `approval_response` |
-| `approval_closed` | `id`, `choice?` | *Planned.* An approval was answered (on another device, by voice, or typed); dismiss it |
-| `transcript` | `turn`, `text` | *Planned.* What the server heard in an audio `query` |
-| `audio` | `ref`, `data`, `mime` | *Planned.* Spoken version of the `response` (`ref` = its `turn`) or `push` (`ref` = its `id`), to devices that declared `audio_out` |
-| `display` | `text`, `seconds?` | *Planned.* The agent shows text on the device's display |
-| `haptic` | `pattern` (`tap`/`double`/`long`) | *Planned.* The agent buzzes the device |
+| `approval_request` | `id`, `text`, `command`, `description`, `choices` | A command approval, to devices that declared `buttons:true` |
+| `approval_result` | `id`, `ok`, `choice?`, `message` | The answer to this device's `approval_response` |
+| `approval_closed` | `id`, `choice?` | An approval was answered (on another device, by voice, or typed); dismiss it |
+| `transcript` | `turn`, `text` | What the server heard in an audio `query` |
+| `audio` | `ref`, `data`, `mime` | Spoken version of the `response` (`ref` = its `turn`) or `push` (`ref` = its `id`), to devices that declared `audio_out` |
+| `display` | `text`, `seconds?` | The agent shows text on the device's display |
+| `haptic` | `pattern` (`tap`/`double`/`long`) | The agent buzzes the device |
 
 ## Delivery rules
 
@@ -125,7 +125,7 @@ can hide controls the server cannot use. See [Capabilities](#capabilities-planne
   survives a server restart (`GLASSES_OUTBOX_PERSIST=off` turns that off).
 - Concurrent queries from one user are serialised by Hermes's session handling.
 
-## Capabilities (planned)
+## Capabilities
 
 A v1 device declares what it has in `hello.device.capabilities`. Every field is optional; a missing field means
 "no". The server never sends a device something it did not declare.
@@ -138,9 +138,9 @@ A v1 device declares what it has in `hello.device.capabilities`. Every field is 
 | `audio_out` | list of MIME types | The device wants the server to speak for it: every `response` and `push` to it is followed by an `audio` frame in the first listed format the server can produce (`audio/mpeg`, `audio/ogg` with Opus, `audio/wav`). |
 | `buttons` | bool | Command approvals arrive as `approval_request` (with choices) instead of a spoken yes/no `push`. |
 | `haptics` | bool | Allows `haptic` frames. |
-| `ack` | bool | The device acknowledges pushes; see [Acknowledgements](#acknowledgements-planned). |
+| `ack` | bool | The device acknowledges pushes; see [Acknowledgements](#acknowledgements). |
 
-## Voice (planned)
+## Voice
 
 **Voice in.** A device that does no speech recognition sends the recording in `query.audio`:
 `{"data": base64, "mime": "audio/wav"}`. Accepted: `audio/wav`, `audio/ogg` (Opus or Vorbis), `audio/mpeg`,
@@ -163,7 +163,7 @@ S→C {"type":"response","turn":"q7","text":"Two meetings: design at ten, lunch 
 S→C {"type":"audio","ref":"q7","mime":"audio/mpeg","data":"SUQzBAAAAA..."}
 ```
 
-## Approvals with buttons (planned)
+## Approvals with buttons
 
 A command approval goes to each of the user's live devices. A v1 device that declared `buttons:true` gets
 `approval_request`; every other device gets the spoken yes/no `push` (origin `approval`) as before. Offline devices
@@ -182,13 +182,13 @@ S→C {"type":"approval_result","id":"a1b2","ok":true,"choice":"once","message":
 - When an approval is answered anywhere (a button, a spoken yes or no, a typed `/approve`), the user's other v1
   devices that got the `approval_request` receive `approval_closed`.
 
-## Device actions (planned)
+## Device actions
 
 The agent can show text (`display`) or buzz (`haptic`) on the user's devices with the `glasses_show_text` and
 `glasses_buzz` tools. During a turn the action goes to the asking device if it declared the capability, otherwise
 to the user's other live devices that did. Actions never reach another user's devices and are never queued.
 
-## Acknowledgements (planned)
+## Acknowledgements
 
 A device that declared `ack:true` answers each `push` with `{"type":"ack","id":<push id>}`. Until the ack arrives
 the push stays in the server's queue: if the device disconnects first, the push is sent again on the next

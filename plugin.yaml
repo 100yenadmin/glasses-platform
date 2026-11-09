@@ -44,4 +44,4 @@ optional_env:
     description: "Longest a push waits for a v0 device's pending answer (default 120)"
     prompt: "v0 push hold (seconds)"
     password: false
-provides_tools: [glasses_capture_photo]
+provides_tools: [glasses_capture_photo, glasses_show_text, glasses_buzz]

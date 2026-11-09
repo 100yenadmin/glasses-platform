@@ -62,6 +62,7 @@ class Connection:
     held: list = field(default_factory=list)  # pushes held for a v0 device until its answer has gone out
     held_task: object = None
     flush_task: object = None
+    unacked: dict = field(default_factory=dict)  # push id -> item, retained until any device delivers it
 
     async def send_json(self, frame):
         async with self.send_lock:
