@@ -81,6 +81,13 @@ hermes gateway restart             # the gateway loads devices when it starts
 The URL points at this machine on your local network. Pass `--host` for another address (for example a Tailscale
 name) and `--wss` behind a TLS proxy.
 
+## ESP32 voice boxes (xiaozhi)
+
+Run `hermes glasses pair me voicebox --xiaozhi` (add `--host` / `--port` if needed), then restart the gateway.
+Paste the printed OTA address into the device's Wi-Fi setup page, under advanced settings → "OTA address".
+Push to talk and hear the answer; server speech needs `ffmpeg` installed on the gateway.
+Reminders play the next time the device opens its connection: xiaozhi devices only connect while talking.
+
 <details><summary>Setting tokens by hand</summary>
 
 Each entry names a user and a device (`user:device=...`); all devices of one user use one Hermes session.
