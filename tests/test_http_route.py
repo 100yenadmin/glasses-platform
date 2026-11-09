@@ -347,6 +347,8 @@ async def test_plain_text(server, monkeypatch, outcome, expected, status):
     response = await client.post('/turn', headers={**AUTH, 'Accept': 'text/plain'}, json={'text': 'Hello'})
     assert response.status == status and response.content_type == 'text/plain'
     assert await response.text() == expected
+    if outcome == 'prompt':  # the prompt was shown: delivered, not queued again
+        assert adapter.outbox.drain('alice') == [] and not adapter.outbox._inflight
 
 
 @pytest.mark.parametrize('terminal,expected', [({'type': 'error', 'message': 'Could not hear.'}, 'Could not hear.')])
@@ -573,7 +575,7 @@ async def test_device_actions_skip_http_requests(server, monkeypatch, capability
     assert capability not in conn.capabilities
 
 
-@pytest.mark.parametrize('body', [{'speak': False}, {}])
+@pytest.mark.parametrize('body', [{'speak': False}, {}, {'plain': True}])
 async def test_no_audio_wait_without_speech(server, monkeypatch, body):
     adapter, client = server
     waits = []
@@ -583,12 +585,13 @@ async def test_no_audio_wait_without_speech(server, monkeypatch, body):
         waits.append(seconds)
         await wait_for(socket, ready, seconds)
     monkeypatch.setattr(http_api, '_wait_for', wait)
-    if body:  # speech switched off for this turn
+    headers = {**AUTH, 'Accept': 'text/plain'} if body.pop('plain', False) else AUTH
+    if body or headers is not AUTH:  # speech switched off for this turn, or a plain-text answer
         reply_with(adapter)
     else:  # an error ends the turn: nothing is spoken
         async def query(conn, frame):
             await conn.send_json({'type': 'error', 'message': 'Could not hear.'})
         monkeypatch.setattr(adapter, '_process_query', query)
-    await client.post('/turn', headers=AUTH,
+    await client.post('/turn', headers=headers,
                       json={'text': 'Hello', **body, 'capabilities': {'audio_out': ['audio/mpeg']}})
     assert waits == [50]

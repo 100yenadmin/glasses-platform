@@ -183,7 +183,8 @@ class HttpApi:
             self.adapter._spawn(self.adapter._process_query(conn, frame))
             await _wait_for(conn.ws, lambda frames: _terminal(frames, turn_id, start) is not None, self.turn_timeout)
             terminal = _terminal(conn.ws.frames, turn_id, start)
-            speaks = body.get('speak') is not False and audio.output_mimes(conn.capabilities)
+            plain = 'text/plain' in request.headers.get('Accept', '').lower()  # a plain body carries no audio
+            speaks = not plain and body.get('speak') is not False and audio.output_mimes(conn.capabilities)
             if speaks and terminal is not None and terminal.get('type') == 'response':
                 await _wait_for(conn.ws, lambda frames: any(
                     item.get('type') == 'audio' and item.get('ref') == turn_id for item in frames), AUDIO_TIMEOUT)
