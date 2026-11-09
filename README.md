@@ -45,8 +45,23 @@ hermes plugins install https://github.com/100yenadmin/glasses-platform --enable
 
 ## Configure
 
-Give each device its own token. Tokens map to `user:device`, and all devices of one user use the same conversation.
-Put this in `~/.hermes/.env`:
+Pair each device with one command. It creates a random token, saves it in the profile's `.env`, and prints the
+connect URL and a QR code to open in the glasses app:
+
+```bash
+hermes glasses pair me rayban      # user "me", device "rayban"
+hermes glasses pair me phone       # a second device: same user, same conversation
+hermes glasses devices             # list paired devices (tokens are never shown)
+hermes glasses revoke me phone     # remove one
+hermes gateway restart             # the gateway loads devices when it starts
+```
+
+The URL points at this machine on your local network. Pass `--host` for another address (for example a Tailscale
+name) and `--wss` behind a TLS proxy.
+
+<details><summary>Setting tokens by hand</summary>
+
+Tokens map to `user:device`, and all devices of one user share the same conversation. Put this in `~/.hermes/.env`:
 
 ```bash
 GLASSES_DEVICES=me:rayban=<long-random-token>,me:g2=<another-token>
@@ -63,6 +78,8 @@ streaming:
   enabled: true      # optional: stream replies to v1 clients as they are written
 ```
 
+</details>
+
 Photo turns need a model that can see: either a main model that accepts images, or an `auxiliary.vision` model in
 `config.yaml`.
 
@@ -77,13 +94,16 @@ To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. 
 generated device token and only the vision, glasses, cronjob and memory toolsets (it uses the z.ai GLM coding plan;
 see the script's header).
 
-**With the simulator:**
+**With the simulator** (no glasses needed; it ships with the plugin and plays a pair of glasses with a camera):
 
 ```bash
-GLASSES_SIM_TOKEN=<token> python sim/glasses_sim.py --url ws://127.0.0.1:8765/voice --say "What can you do?"
+hermes glasses pair me sim --host 127.0.0.1 --no-qr     # prints ws://127.0.0.1:8765/voice?token=...
+hermes gateway restart
+python ~/.hermes/plugins/glasses-platform/sim/glasses_sim.py --pretty \
+  --url "<the URL it printed>" --say "What am I looking at?" --say "Remind me in one minute to stretch."
 ```
 
-To test a photo turn, add `--photo photo.jpg`. The plugin asks the "glasses" for a photo when you say something like
+Add `--wait-push 90` to stay connected until the reminder arrives, or `--photo photo.jpg` to show your own picture. The plugin asks the "glasses" for a photo when you say something like
 "what am I looking at?". The agent can also take one itself with the `glasses_capture_photo` tool.
 
 **With the hermes-glasses iOS app** (untested so far): in the app, set Settings → Assistant → Backend to Bridge,
