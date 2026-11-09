@@ -48,6 +48,7 @@ class Approval:
     request_id: str | None
     choices: list
     at: float
+    shown: bool = False  # its question has gone out to the devices (or the outbox)
 
 
 def _as_media(metadata):
@@ -119,7 +120,6 @@ class GlassesAdapter(BasePlatformAdapter):
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
         self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
         self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
-        self._clarifying = set()  # users just asked a clarify question: their next query goes to Hermes as is
         self._runner, self._app, self._loop = None, None, None
 
     async def connect(self, *, is_reconnect=False):
@@ -281,9 +281,7 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user
-        asked_clarify = user in self._clarifying  # the next words answer the agent's question, not an approval
-        self._clarifying.discard(user)
-        choice = spoken_choice(text) if self._approvals.get(user) and not asked_clarify else None
+        choice = spoken_choice(text) if self._approvals.get(user) else None
         if choice and await self._answer_approval(conn, frame.get('id'), choice):
             return
         turn_id = frame.get('id')
@@ -536,6 +534,7 @@ class GlassesAdapter(BasePlatformAdapter):
         user = str(prompt.chat_id)
         if user not in {identity.user for identity in self._tokens.values()}:
             return SendResult(success=False, error='Unknown glasses user')
+        self._live_approvals(user)  # forget requests that ended, so they can never be confused with this one
         request_id = getattr(prompt, 'request_id', None)
         if not request_id:  # Hermes before 0.23 does not pass it: take the one new request in the session's queue
             known = {a.request_id for a in self._approvals.get(user, [])}
@@ -544,15 +543,17 @@ class GlassesAdapter(BasePlatformAdapter):
             if len(new) != 1:
                 return SendResult(success=False, error='Approval request not identifiable')  # Hermes' text prompt
             request_id = new[0]
-        self._approvals.setdefault(user, []).append(
-            Approval(prompt.session_key, request_id, list(prompt.choices), time.monotonic()))
+        approval = Approval(prompt.session_key, request_id, list(prompt.choices), time.monotonic())
+        self._approvals.setdefault(user, []).append(approval)
         command = ' '.join(str(prompt.command).split())
         command = command if len(command) <= 90 else command[:87] + '...'
         reason = ' '.join(str(prompt.description or '').split()).rstrip('.')
         reason = reason[:1].upper() + reason[1:]
         allow = 'Say yes to allow it once, or no to block it.' if 'once' in prompt.choices else 'Say no to block it.'
         text = f'Hermes wants to run: {command}.' + (f' {reason}.' if reason else '') + f' {allow} (Typed: /approve or /deny.)'
-        return await self._push(user, text, 'approval', uuid4().hex)
+        result = await self._push(user, text, 'approval', uuid4().hex)
+        approval.shown = True
+        return result
 
     def _live_approvals(self, user):
         """This user's approvals that Hermes still waits for (not timed out, not answered by a typed /approve)."""
@@ -567,16 +568,21 @@ class GlassesAdapter(BasePlatformAdapter):
 
     async def _answer_approval(self, conn, query_id, choice):
         """Answer the one approval this user's devices are waiting on with a spoken yes or no. False when none is
-        waiting, or "yes" is not offered, so the words go to the agent instead. With two or more waiting, a bare
-        yes is ambiguous: nothing is resolved and the device is told how to answer."""
+        waiting, a clarify question is open, or "yes" is not offered: the words then go to the agent. When it is
+        not certain which request the words answer (two waiting, one that ended just now, one not yet shown),
+        nothing is resolved and the device is told how to answer."""
         from tools.approval import resolve_gateway_approval
+        from tools import clarify_gateway
         user = conn.identity.user
+        known = len(self._approvals.get(user, []))
         live = self._live_approvals(user)
         if not live:
             return False
-        if len(live) > 1:
-            await self._deliver_reply(user, conn, query_id, f'{len(live)} commands are waiting for approval, so I did '
-                                      'not act on that. Answer them with /approve or /deny.')
+        if any(clarify_gateway.has_pending(a.session_key) for a in live):
+            return False  # the agent asked a question: a yes or no answers that (Hermes' clarify handler)
+        if len(live) > 1 or len(live) != known or not live[0].shown:
+            await self._deliver_reply(user, conn, query_id, 'I was not sure which command that answers, so I did not '
+                                      'act on it. Answer with /approve or /deny.')
             return True
         approval = live[0]
         if choice not in approval.choices:
@@ -628,9 +634,6 @@ class GlassesAdapter(BasePlatformAdapter):
         return await super().send_document(*args, metadata=_as_media(metadata), **kwargs)
 
     async def send_clarify(self, *args, metadata=None, **kwargs):
-        chat_id = args[0] if args else kwargs.get('chat_id')
-        if chat_id is not None:
-            self._clarifying.add(str(chat_id))
         return await super().send_clarify(*args, metadata={**(metadata or {}), 'glasses_prompt': 'clarify'}, **kwargs)
 
     async def _status(self, user, state, detail=None):

@@ -40,7 +40,9 @@ def hermes(server, monkeypatch):
             return 1
         return 0
     resolve.queue = queue
+    resolve.clarify = set()  # session keys with an open clarify question
     monkeypatch.setattr('tools.approval.resolve_gateway_approval', resolve)
+    monkeypatch.setattr('tools.clarify_gateway.has_pending', lambda key: key in resolve.clarify)
     monkeypatch.setattr('tools.approval.list_gateway_approvals', lambda key: [{'request_id': r} for r in queue])
     return adapter, client, calls, resolve
 
@@ -140,7 +142,7 @@ async def test_with_two_waiting_a_bare_yes_resolves_nothing(hermes):
     await ask_approval(adapter, resolve, 'r2', command='git push --force')
     await say(ray, 'yes')
     frame = await until(ray, 'response')
-    assert frame['text'].startswith('2 commands are waiting') and calls == []
+    assert frame['text'].startswith('I was not sure which command') and calls == []
     assert adapter.handle_message.await_count == 0
     await ray.close()
 
@@ -150,12 +152,38 @@ async def test_the_answer_to_a_clarify_question_is_never_taken_as_an_approval(he
     adapter, client, calls, resolve = hermes
     ray = await opened(client, version=1)
     await ask_approval(adapter, resolve)
-    await adapter.send_clarify('alice', 'Delete the backups too?', None, 'c1', 'agent:main:glasses:dm:alice')
+    resolve.clarify.add('agent:main:glasses:dm:alice')  # Hermes asked "Delete the backups too?" and waits
+    await say(ray, '/status', 'q0')
     await say(ray, 'yes')
     await asyncio.sleep(0.1)
-    assert calls == [] and adapter.handle_message.await_count == 1  # Hermes' clarify handler gets it
-    await say(ray, 'yes', 'q2')  # the next yes answers the approval
+    assert calls == [] and adapter.handle_message.await_count == 2  # both reach Hermes; its clarify handler gets "yes"
+    resolve.clarify.clear()  # the question was answered
+    await say(ray, 'yes', 'q2')
     assert (await until(ray, 'response'))['turn'] == 'q2' and calls[0][2] == 'r1'
+    await ray.close()
+
+
+@pytest.mark.asyncio
+async def test_an_answer_to_a_request_that_just_ended_never_moves_to_the_next(hermes):
+    adapter, client, calls, resolve = hermes
+    ray = await opened(client, version=1)
+    await ask_approval(adapter, resolve, 'r1')
+    await ask_approval(adapter, resolve, 'r2', command='git push --force')
+    resolve.queue.remove('r1')  # r1 timed out just as the wearer said yes to it
+    await say(ray, 'yes')
+    assert (await until(ray, 'response'))['text'].startswith('I was not sure') and calls == []
+    await ray.close()
+
+
+@pytest.mark.asyncio
+async def test_a_request_not_yet_shown_is_never_answered(hermes):
+    from glasses_plugin.adapter import Approval
+    adapter, client, calls, resolve = hermes
+    ray = await opened(client, version=1)
+    resolve.queue.append('r9')
+    adapter._approvals['alice'] = [Approval('agent:main:glasses:dm:alice', 'r9', ['once', 'deny'], 0.0)]  # push pending
+    await say(ray, 'yes')
+    assert (await until(ray, 'response'))['text'].startswith('I was not sure') and calls == []
     await ray.close()
 
 
