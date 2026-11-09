@@ -299,7 +299,8 @@ Only recordings containing a speech-sized packet (over 12 bytes and over half a 
 for example over 30 bytes at 60 ms or 12 bytes at 20 ms) are submitted. Size cannot tell constant-bitrate
 silence from speech, so a silent recording may still be transcribed (and answered with "I couldn't hear that."). In `auto` / `realtime`, 800 ms of quiet
 packets (any packet that is not speech-sized, after speech) also ends the recording; libopus codes silence at
-16 kb/s in 0.3-0.4 byte per ms, so variable-bitrate and DTX silence both count as quiet. Constant-bitrate silence
+16 kb/s in 0.3-0.4 byte per ms, so variable-bitrate silence and sent DTX packets count as quiet (firmware that sends nothing during DTX
+reaches the time limit instead). Constant-bitrate silence
 and steady background noise do not, and then the recording runs to its limit. Recordings end at 15 seconds of wall or
 audio time, or at 240,000 bytes of Opus. Packets over 1500 bytes are ignored, and a WebSocket message over 64 KiB
 closes the connection. `listen detect`, MCP and unknown types are ignored. `abort`
