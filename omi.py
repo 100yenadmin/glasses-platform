@@ -1,0 +1,149 @@
+"""Omi's live transcript webhook, carried by the existing short-lived HTTP connection."""
+import hashlib
+import json
+import re
+import time
+from time import monotonic
+from uuid import uuid4
+
+from aiohttp import web
+from gateway.platforms._shared import extra_or_secret
+
+from .devices import Connection, authenticate
+from .http_api import HttpSocket, _finish, _is_push, _requeue, _send, _terminal, _wait_for
+
+WAKE = re.compile(r"^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes(?!\s*['’]\s*s\b)\b[\W_]*", re.IGNORECASE)
+FOLLOWUP_SECONDS = 8
+MESSAGE_LIMIT = 1000
+MESSAGE_PREFIX = 'Hermes: '
+SESSION_SECONDS = 600
+MAX_SEEN = 256
+MAX_SESSIONS = 32
+
+
+class OmiApi:
+    def __init__(self, adapter):
+        self.adapter = adapter
+        self.omi_wait = float(extra_or_secret(adapter.config.extra, 'omi_wait', 'GLASSES_OMI_WAIT', 20))
+        self.sessions = {}  # (authenticated identity, session_id) -> seen segments and wake deadline
+
+    def _questions(self, identity, session_id, segments):
+        now = monotonic()
+        for key, state in list(self.sessions.items()):
+            if now - state['last_call'] >= SESSION_SECONDS:
+                del self.sessions[key]
+        key = (identity, session_id)
+        state = self.sessions.pop(key, {'seen': {}, 'until': 0})
+        state['last_call'] = now
+        self.sessions[key] = state  # insertion order is session access order
+        sessions = [key for key in self.sessions if key[0] == identity]
+        if len(sessions) > MAX_SESSIONS:
+            del self.sessions[sessions[0]]
+        if state['until'] < now:
+            state['until'] = 0
+        user_only = any(segment.get('is_user') is True for segment in segments)
+        questions, words = [], []
+        for segment in segments:
+            text = segment['text']
+            key = (segment.get('start'), text)
+            if key in state['seen']:
+                continue
+            state['seen'][key] = None
+            if len(state['seen']) > MAX_SEEN:
+                del state['seen'][next(iter(state['seen']))]
+            if user_only and segment.get('is_user') is not True:
+                continue
+            wake = WAKE.match(text)
+            if wake:
+                if words:
+                    questions.append(' '.join(words))
+                    words = []
+                state['until'] = now + FOLLOWUP_SECONDS
+                text = text[wake.end():]
+            if state['until'] and text.strip():
+                words.append(text.strip())
+        if words:
+            questions.append(' '.join(words))
+            state['until'] = 0
+        return questions
+
+    async def _segments(self, request):
+        try:
+            segments = await request.json()
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            raise web.HTTPBadRequest(text='{"error":"malformed JSON"}', content_type='application/json')
+        if not isinstance(segments, list) or any(
+                not isinstance(segment, dict) or not isinstance(segment.get('text'), str)
+                or not isinstance(segment.get('start', 0), (int, float)) for segment in segments):
+            raise web.HTTPBadRequest(text='{"error":"expected transcript segments"}', content_type='application/json')
+        return segments
+
+    @staticmethod
+    def _answer(frames, turn_ids):
+        # Keep arrival order. Only an item too long on its own is clipped (its head shows, and it counts as shown);
+        # an item that does not fit after others stays out, with everything after it, for the next call.
+        parts, shown, length = [], [], len(MESSAGE_PREFIX)
+        for frame in frames:
+            if not (_is_push(frame) or frame.get('type') == 'response' and frame.get('turn') in turn_ids
+                    or frame.get('type') == 'error'):
+                continue
+            text = frame.get('text', frame.get('message', ''))
+            if not isinstance(text, str) or not text:
+                continue
+            separator = 2 if parts else 0
+            room = MESSAGE_LIMIT - length - separator
+            if room <= 0:
+                break
+            if len(text) > room:
+                if parts:
+                    break
+                text = text[:room - 1] + '…'
+            parts.append(text)
+            shown.append(frame)
+            length += separator + len(text)
+        message = MESSAGE_PREFIX + '\n\n'.join(parts) if parts else ''
+        return web.json_response({'message': message} if message else {}), lambda frame: frame in shown
+
+    async def transcript(self, request):
+        identity = authenticate(request.match_info['token'], self.adapter._tokens)
+        if identity is None:
+            raise web.HTTPUnauthorized(text='{"error":"unauthorized"}', content_type='application/json')
+        segments = await self._segments(request)
+        questions = self._questions(identity, request.query.get('session_id', ''), segments)
+        conn = Connection(HttpSocket(), identity, protocol=1, capabilities={},
+                          slot=f'{identity.device}#omi-{uuid4().hex}')
+        turns = [(uuid4().hex, text) for text in questions]
+        conn.asking.update((turn_id, monotonic()) for turn_id, _ in turns)
+        turn_ids = {turn_id for turn_id, _ in turns}
+        reply = None
+        try:
+            await self.adapter.registry.add(conn)
+            await self.adapter._flush_outbox(conn)
+            start = len(conn.ws.frames)
+            for turn_id, text in turns:
+                self.adapter._spawn(self.adapter._process_query(conn, {'type': 'query', 'id': turn_id, 'text': text}))
+            if turns:
+                await _wait_for(conn.ws, lambda frames: all(
+                    _terminal(frames, turn_id, start) is not None for turn_id in turn_ids), self.omi_wait)
+            frames = await _finish(self.adapter, conn)
+            self._keep_replies(conn, frames, turn_ids)
+            response, shown = self._answer(frames, turn_ids)
+        except BaseException:
+            self._keep_replies(conn, await _finish(self.adapter, conn), turn_ids)
+            _requeue(self.adapter, conn)
+            raise
+        # Replies ride with the pushes: shown ones are delivered once written, each other one is queued on its own.
+        return await _send(request, self.adapter, conn, response, shown)
+
+    @staticmethod
+    def _keep_replies(conn, frames, turn_ids):
+        user = conn.identity.user
+        for frame in frames:
+            if frame.get('type') == 'response' and frame.get('turn') in turn_ids and frame.get('text'):
+                key = hashlib.sha256(json.dumps([user, frame['turn']]).encode()).hexdigest()[:32]
+                conn.sent_items.append(((time.time(), frame['text'], 'reply', f'reply-{key}'), frame))
+
+
+def register_routes(adapter, app):
+    api = OmiApi(adapter)
+    app.router.add_post('/omi/{token}/transcript', api.transcript)
