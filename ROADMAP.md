@@ -75,7 +75,7 @@ connect. See [docs/DEVICES.md](docs/DEVICES.md) for the device survey behind thi
   (watchOS allows HTTP(S) requests but WebSockets only during audio or calls), Garmin, Siri Shortcuts, polling clients.
 - [x] Conformance kit (0.5.0): the simulator's scenarios as a test any client can run against a server, so a
   third-party app can show it works with Hermes.
-- [ ] Small client libraries: JavaScript done (0.5.0, used by the G2 app); Python next.
+- [x] Small client libraries: JavaScript (0.5.0, used by the G2 app); Python (next release).
 
 **Exit criteria:** the conformance kit passes against the plugin over both the WebSocket and the HTTP route, and
 two different device classes complete a real-device session.

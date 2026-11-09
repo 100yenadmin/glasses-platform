@@ -2,6 +2,11 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## Unreleased
+
+- **Python device client:** asyncio WebSocket and HTTP helpers with protocol v1, reconnect, correlated turns,
+  approvals and camera replies. See [the Python client](clients/python/README.md).
+
 ## 0.5.2 (2026-11-09): answer Hermes's questions from the G2 glasses
 
 - **G2: questions during a turn.** When Hermes asks a question in the middle of a G2 turn (its clarify tool), the
