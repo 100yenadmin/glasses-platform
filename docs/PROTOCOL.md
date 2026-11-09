@@ -278,3 +278,45 @@ S→C {"type":"capture_photo"}
 C→S {"type":"photo","data":"/9j/4AAQ..."}
 S→C {"type":"response","text":"A red bicycle leaning on a brick wall.","tts":false}
 ```
+
+## xiaozhi devices
+
+Stock xiaozhi-esp32 firmware discovers this transport through `POST /xiaozhi/ota/{token}` with its system-info
+JSON. The same paired device credential authenticates OTA and `GET /xiaozhi` (Bearer header or `?token=`).
+OTA returns only `websocket` (`url`, `token`, `version:1`), `server_time` (UTC milliseconds, offset 0), and
+`firmware` (the reported `application.version`, or `"0"`, with an empty download URL). No activation or MQTT is
+needed. The WebSocket URL uses the request Host and HTTPS / `X-Forwarded-Proto: https` for `wss`; override it
+with `platforms.glasses.extra.xiaozhi_url` or `GLASSES_XIAOZHI_URL` behind a proxy. Treat the OTA URL as a secret.
+
+Within 10 seconds the device sends `hello` and its Opus `audio_params`; the server replies with a fresh
+`session_id`, `transport:websocket`, and Opus 24 kHz mono / 60 ms output. `Protocol-Version` overrides the hello's
+`version` (default 1). Binary v1 is raw Opus; v2 uses the 16-byte version/type/reserved/timestamp/size header,
+v3 the 4-byte type/reserved/size header, with multibyte fields in network order. Non-audio or malformed binary
+headers are ignored. The input parameters are retained for wrapping microphone packets in Ogg Opus.
+
+`listen start` collects packets; `listen stop` submits one v1 audio/ogg query, with an empty text and a fresh id.
+Only recordings containing a speech-sized packet (over 12 bytes and over half a byte per millisecond of frame,
+for example over 30 bytes at 60 ms or 12 bytes at 20 ms) are submitted. Size cannot tell constant-bitrate
+silence from speech, so a silent recording may still be transcribed (and answered with "I couldn't hear that."). In `auto` / `realtime`, 800 ms of quiet
+packets (any packet that is not speech-sized, after speech) also ends the recording; libopus codes silence at
+16 kb/s in 0.3-0.4 byte per ms, so variable-bitrate silence and sent DTX packets count as quiet (firmware that sends nothing during DTX
+reaches the time limit instead). Constant-bitrate silence
+and steady background noise do not, and then the recording runs to its limit. Recordings end at 15 seconds of wall or
+audio time, or at 240,000 bytes of Opus. Packets over 1500 bytes are ignored, and a WebSocket message over 64 KiB
+closes the connection. `listen detect`, MCP and unknown types are ignored. `abort`
+cancels queued/current playback; it submits `/stop` only if this connection owns the active unanswered turn.
+
+The registered v1 connection declares `audio_out:["audio/mpeg"]`, speaker, mic and display. `transcript` becomes
+`stt`; thinking/working status becomes one thinking `llm` expression per turn. Responses, pushes and errors are
+spoken in order as `tts start`, `sentence_start` with text, binary Opus, `tts stop`. A matching MPEG `audio.ref`
+is awaited for up to 20 seconds from enqueue; without it (or for errors), only the text events are sent.
+`ffmpeg` converts MPEG to 24 kHz mono / 60 ms Opus, paced at about 55 ms per packet; missing ffmpeg falls back to
+text events with one warning. `display` becomes a neutral Hermes `alert`; other adapter frames are dropped.
+A push counts as delivered once its `tts stop` has been sent; a push that was aborted or not finished when the
+device disconnects goes back to the queue for the next connect (or another device). The device itself sends no
+playback acknowledgement, so a disconnect can repeat a partially heard push.
+
+`sim/xiaozhi_sim.py --ota <private-OTA-URL> --wav sim/sample-voice.wav --out reply.ogg` exercises the device flow.
+It prints incoming JSON, uploads Opus in manual mode and saves reply packets as Ogg. `--text-only` listens and
+prints without uploading a recording or saving audio. The bundled WAV is a generated two-second 16 kHz mono tone.
+Compatibility tests use fake adapter voice frames; physical firmware playback and live Hermes voice are unproven.

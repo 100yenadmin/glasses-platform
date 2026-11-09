@@ -81,6 +81,17 @@ hermes gateway restart             # the gateway loads devices when it starts
 The URL points at this machine on your local network. Pass `--host` for another address (for example a Tailscale
 name) and `--wss` behind a TLS proxy.
 
+## ESP32 voice boxes (xiaozhi)
+
+Run `hermes glasses pair me voicebox --xiaozhi` (add `--host` / `--port` if needed), then restart the gateway.
+Paste the printed OTA address into the device's Wi-Fi setup page, under advanced settings → "OTA address".
+Push to talk and hear the answer; server speech needs `ffmpeg` installed on the gateway.
+Reminders play the next time the device opens its connection: xiaozhi devices only connect while talking.
+They stay in the outbox until the bridge sends the normal playback `tts stop`; aborted or disconnected playback
+is queued again on disconnect. This records socket delivery, not proof that the device played the sound.
+Recordings stop at 15 seconds or 240,000 encoded Opus bytes (15 s × 16 kB/s). Opus packets over 1,500 bytes are
+ignored; WebSocket messages are limited to 64 KiB. Ogg container work at 32 KiB or above runs in a worker thread.
+
 <details><summary>Setting tokens by hand</summary>
 
 Each entry names a user and a device (`user:device=...`); all devices of one user use one Hermes session.
@@ -159,7 +170,8 @@ short offline queue until a device reconnects.
 ## What it does on your machine
 
 - **Opens a network listener.** A WebSocket server on all interfaces, port 8765, path `/voice`, plus the HTTP
-  routes `/turn`, `/pending`, `/approval` and `/omi/{token}/transcript` on the same port and with the same tokens (set `GLASSES_HOST`
+  routes `/turn`, `/pending`, `/approval`, `/omi/{token}/transcript`, `/xiaozhi/ota/{token}` and the `/xiaozhi`
+  WebSocket on the same port and with the same tokens (set `GLASSES_HOST`
   to `127.0.0.1` to keep it local). It refuses to start until at least one device token is configured.
 - **A device token is full access to your agent.** Anyone holding one can chat with your agent as you, and can answer
   the approval prompts and clarify questions the agent sends to your devices. Keep tokens long, random and private.
