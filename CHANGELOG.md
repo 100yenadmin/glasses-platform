@@ -2,14 +2,15 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
-## Unreleased
+## 0.5.0 (2026-11-09): one plugin for every non-desktop device
 
+- **JavaScript client** (`clients/js/hermes-glasses.js`): a dependency-free protocol v1 client for browsers, phones
+  and web views, with connect and reconnect, asks with timeouts, interrupts, approvals and photos. The G2 app uses it.
+- **Conformance kit** (`python -m glasses_plugin.conformance`): `check-server` tests any gateway against the protocol;
+  a fake server tests a client.
 - **Omi pendant.** Say “Hey Hermes, …” in a live Omi conversation to ask your agent through
   `POST /omi/{token}/transcript`. Answers, reminders and approval prompts return as Omi notifications; slow
   replies wait for the next transcript call. See [Omi setup](README.md#omi-pendant).
-- **Omi webhook fixes.** Prefix notifications with `Hermes: `, keep item heads oldest first within 1000
-  characters, acknowledge truncated pushes, and queue items with no room. Bound idle sessions and segment
-  deduplication, reject possessive wake words, and return `400` for deeply nested malformed JSON.
 - **ESP32 voice boxes (xiaozhi).** Boards running the open-source xiaozhi firmware pair with
   `hermes glasses pair me voicebox --xiaozhi` and the device's OTA address: push to talk with Opus audio, spoken
   answers, abort, and reminders played the next time the device connects. See

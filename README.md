@@ -7,9 +7,10 @@ Plugin id and repository: `glasses-platform`.
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.4.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.5.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
-> `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
+> `main`. Each device path below was run against a real Hermes gateway with a simulated device; no real glasses,
+> watch or voice box has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
 
 ## What it is
@@ -44,14 +45,19 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 - **Set up in one command, try it without glasses.** `hermes glasses pair` prints a connect URL and QR code;
   `hermes glasses try` talks to your agent from the terminal as a pair of glasses with a camera.
 
-## Planned support
+## Devices
 
-| Glasses | Path |
-|---|---|
-| Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | A phone app on Meta's Wearables Device Access Toolkit. The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode; not yet tested against this plugin on a device. |
-| Even Realities G2 | [Hermes Glasses Even Hub app](clients/even-g2/README.md): mic, lens replies, pushes and touchpad approvals (M7; checked in the Even Hub simulator, not yet on real glasses) |
-| Mentra Live | Mentra cloud app (M4) |
-| Meta AI on glasses | Meta AI Connectors endpoint (M4, gated on Meta early access) |
+| Device | How it connects | Checked |
+|---|---|---|
+| Even Realities G2 glasses | [Even Hub app](clients/even-g2/README.md): tap to talk, answers on the lens, touchpad approvals, reminders | Even Hub simulator + real gateway |
+| ESP32 voice boxes (xiaozhi firmware, 138+ boards) | [OTA pairing and the xiaozhi voice protocol](#esp32-voice-boxes-xiaozhi) | Simulated device + real gateway |
+| Omi pendant | [Real-time transcript webhook](#omi-pendant): "Hey Hermes, …" | Webhook calls + real gateway |
+| Pebble watches | [The open-source Bobby app](#pebble-bobby) with a two-line URL override | Bobby-protocol client + real gateway |
+| Apple Watch, Siri Shortcuts, scripts | [HTTP route](docs/devices/apple-watch.md): `POST /turn`, `GET /pending` | Real gateway |
+| Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode | Bundled v0 simulator |
+| Your own client | [JavaScript client](clients/js/hermes-glasses.js), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
+
+Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
 
 ## Install
 
