@@ -42,6 +42,24 @@ def spoken_choice(text):
     return 'once' if phrase in _YES else 'deny' if phrase in _NO else None
 
 
+def hermes_approval_words():
+    """Hermes' own bare-word approval replies, word -> 'once', 'deny', or None (session/always). While an approval
+    blocks, Hermes takes these exact words (stripped, lower-cased) as /approve or /deny for its OLDEST request."""
+    words = {'\U0001f44d': 'once', '\U0001f44e': 'deny'}
+    try:
+        from gateway.run_busy import approval_input_words
+        lists = [(approval_input_words(key), choice) for key, choice in
+                 (('approve', 'once'), ('deny', 'deny'), ('always', None), ('session', None))]
+    except Exception:  # pragma: no cover - the English list of Hermes 0.22.2 and 0.23.0
+        lists = [('approve yes ok okay confirm y'.split(), 'once'), ('deny no reject cancel n'.split(), 'deny'),
+                 (['always', 'approve always', 'always approve'], None),
+                 (['session', 'approve session', 'session approve'], None)]
+    for group, choice in lists:
+        for word in group:
+            words.setdefault(word, choice)
+    return words
+
+
 @dataclass
 class Approval:
     session_key: str
@@ -282,9 +300,13 @@ class GlassesAdapter(BasePlatformAdapter):
             await self._answered(conn, frame.get('id'))
             return
         user = conn.identity.user
-        choice = spoken_choice(text) if self._approval_sessions.get(user) else None
-        if choice and await self._answer_approval(conn, frame.get('id'), choice):
-            return
+        # A yes or no while an approval waits is handled here (a typed /approve or /deny goes to Hermes as is).
+        if self._approval_sessions.get(user) and not text.startswith('/'):
+            hermes_words = hermes_approval_words()
+            raw = text.lower()
+            choice = hermes_words[raw] if raw in hermes_words else spoken_choice(text)
+            if (raw in hermes_words or choice) and await self._answer_approval(conn, frame.get('id'), choice):
+                return
         turn_id = frame.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
         self._queries[turn_id] = conn
@@ -569,34 +591,40 @@ class GlassesAdapter(BasePlatformAdapter):
         return live
 
     async def _answer_approval(self, conn, query_id, choice):
-        """Answer the one approval this user's devices are waiting on with a spoken yes or no.
+        """Answer the one approval this user's devices are waiting on with a spoken yes or no (`choice` None: an
+        approval word that asks for more than once, like "always").
 
-        False (the words go to Hermes) when no approval is waiting or a clarify question is open. Hermes itself
-        takes a bare "yes" as /approve for the OLDEST waiting request, so whenever any request waits and it is not
-        certain which one the words answer (two waiting, one this adapter could not identify, one that ended
-        mid-answer, one not yet shown), the words are kept here, nothing is resolved, and the device is told how
-        to answer."""
+        False (the words go to Hermes) when no approval is waiting or a clarify question is open on the session
+        the words go to (Hermes answers that first). Hermes itself takes a bare "yes" as /approve for its OLDEST
+        waiting request, so whenever a request waits and it is not certain which one the words answer (two
+        waiting, one this adapter could not identify, one that ended mid-answer, one not yet shown), the words
+        are kept here, nothing is resolved, and the device is told how to answer."""
         from tools.approval import list_gateway_approvals, resolve_gateway_approval
         from tools import clarify_gateway
         user = conn.identity.user
-        sessions = self._approval_sessions.get(user, set())
+        source = self.build_source(chat_id=user, chat_name=user, chat_type='dm', user_id=user, user_name=user)
+        own_session = self._source_session_key(source)
+        sessions = self._approval_sessions.get(user, set()) | {own_session}
         queued = {d.get('request_id') for key in sessions for d in list_gateway_approvals(key)}
         if not queued:
             self._approvals.pop(user, None)
             return False
-        if any(clarify_gateway.has_pending(key) for key in sessions):
+        if clarify_gateway.has_pending(own_session):
             return False  # the agent asked a question: Hermes routes a yes or no to its clarify handler first
         known = len(self._approvals.get(user, []))
         live = self._live_approvals(user)
         approval = live[0] if len(live) == 1 else None
-        if (approval and approval.shown and known == 1 and queued == {approval.request_id}
-                and choice in approval.choices
-                and resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id)):
+        certain = bool(approval and approval.shown and known == 1 and queued == {approval.request_id})
+        if certain and choice is None:
+            said = 'By voice I can only allow a command once. Say yes or no.'
+        elif certain and choice not in approval.choices:
+            said = 'This command can only be blocked. Say no to block it.'
+        elif certain and resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
             self._approvals.pop(user, None)
             said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."
         else:
             self._live_approvals(user)
-            said = 'I was not sure which command that answers, so I did not act on it. Answer with /approve or /deny.'
+            said = 'I was not sure which command that answers, so I did not act on it. Use /approve or /deny.'
         await self._deliver_reply(user, conn, query_id, said)
         return True
 

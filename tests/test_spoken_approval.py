@@ -239,7 +239,7 @@ async def test_yes_never_approves_more_than_offered(hermes):
     await ask_approval(adapter, resolve, actions=[('Deny', 'deny', 'danger')])
     assert 'Say no to block it.' in (await until(ray, 'push'))['text']
     await say(ray, 'yes')  # kept here: Hermes would take a bare "yes" as /approve
-    assert (await until(ray, 'response'))['text'].startswith('I was not sure')
+    assert (await until(ray, 'response'))['text'] == 'This command can only be blocked. Say no to block it.'
     assert calls == [] and adapter.handle_message.await_count == 0
     await say(ray, 'no', 'q2')
     assert (await until(ray, 'response'))['turn'] == 'q2' and calls[0][1] == 'deny'
@@ -271,3 +271,49 @@ async def test_try_can_answer_an_approval_while_the_turn_waits(hermes):
 async def test_a_prompt_for_an_unknown_user_falls_back_to_hermes_text(hermes):
     adapter, *_ = hermes
     assert not (await adapter._send_exec_approval_prompt(prompt('mallory'))).success
+
+
+def test_the_session_key_matches_the_one_hermes_checks(make_adapter):
+    adapter = make_adapter()
+    source = adapter.build_source(chat_id='alice', chat_name='alice', chat_type='dm', user_id='alice', user_name='alice')
+    assert adapter._source_session_key(source) == 'agent:main:glasses:dm:alice'  # the key these tests use
+
+
+@pytest.mark.asyncio
+async def test_a_typed_slash_command_always_goes_to_hermes(hermes):
+    adapter, client, calls, resolve = hermes
+    ray = await opened(client, version=1)
+    await ask_approval(adapter, resolve, 'r1')
+    await ask_approval(adapter, resolve, 'r2')
+    await say(ray, '/approve')  # the explicit command: Hermes' own semantics
+    await asyncio.sleep(0.1)
+    assert calls == [] and adapter.handle_message.await_count == 1
+    await ray.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('word', ['confirm', 'y', 'always', 'approve session', 'reject', 'n', '\U0001f44d'])
+async def test_every_hermes_approval_word_is_kept_when_unsure(hermes, word):
+    adapter, client, calls, resolve = hermes
+    ray = await opened(client, version=1)
+    await ask_approval(adapter, resolve, 'r1')
+    await ask_approval(adapter, resolve, 'r2')
+    await say(ray, word)
+    assert (await until(ray, 'response'))['text'].startswith('I was not sure')
+    assert calls == [] and adapter.handle_message.await_count == 0
+    await ray.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('word,choice,reply', [
+    ('confirm', 'once', 'Okay, going ahead.'), ('\U0001f44e', 'deny', "Okay, I won't run it."),
+    ('always', None, 'By voice I can only allow a command once. Say yes or no.'),
+    ('approve session', None, 'By voice I can only allow a command once. Say yes or no.')])
+async def test_hermes_words_with_one_request_waiting(hermes, word, choice, reply):
+    adapter, client, calls, resolve = hermes
+    ray = await opened(client, version=1)
+    await ask_approval(adapter, resolve, 'r1')
+    await say(ray, word)
+    assert (await until(ray, 'response'))['text'] == reply
+    assert calls == ([('agent:main:glasses:dm:alice', choice, 'r1')] if choice else [])
+    await ray.close()
