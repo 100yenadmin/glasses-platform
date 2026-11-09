@@ -7,7 +7,7 @@ Plugin id and repository: `glasses-platform`.
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.5.2 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.6.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. Each device path below was run against a real Hermes gateway with a simulated device; no real glasses,
 > watch or voice box has been tested yet. Read the [design plan](docs/PLAN.md), the
@@ -55,7 +55,7 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 | Pebble watches | [The open-source Bobby app](#pebble-bobby) with a two-line URL override | Bobby-protocol client + real gateway |
 | Apple Watch, Siri Shortcuts, scripts | [HTTP route](docs/devices/apple-watch.md): `POST /turn`, `GET /pending` | Real gateway |
 | Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode | Bundled v0 simulator |
-| Your own client | [JavaScript client](clients/js/hermes-glasses.js), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
+| Your own client | [JavaScript client](clients/js/hermes-glasses.js), [Python client](clients/python/README.md), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
 
 Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
 
