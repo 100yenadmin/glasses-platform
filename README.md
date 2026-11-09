@@ -4,7 +4,7 @@
 
 Your own Hermes agent on smart glasses and voice devices: it sees what you see, answers by voice, and reminds you.
 
-**[Watch the 90-second demo](https://x.com/ElectricSheepIO/status/2119822401361916227)**
+**[Watch the demo](https://x.com/ElectricSheepIO/status/2119822401361916227)**
 
 [![Latest release](https://img.shields.io/github/v/release/100yenadmin/glasses-platform)](https://github.com/100yenadmin/glasses-platform/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
