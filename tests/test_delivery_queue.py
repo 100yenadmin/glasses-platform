@@ -322,3 +322,20 @@ async def test_new_session_while_a_turn_runs_resets_and_acknowledges(server, con
     await adapter.send('alice', 'Answer A.', metadata={'notify': True})
     await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
     assert replies(glasses) == [('A', 'Answer A.')]
+
+
+@pytest.mark.asyncio
+async def test_hermes_ids_with_suffix_route_like_the_device_ids(server):
+    # Hermes sees 'A~g<8 hex>' for the device's 'A' (fresh ids per query); every id it hands back is translated.
+    adapter, _ = server
+    glasses = await device(adapter, 'ray', flushed=True)
+    a, b = started(adapter, 'A', glasses), started(adapter, 'B', glasses)
+    a.message_id, b.message_id = 'A~g0000000a', 'B~g0000000b'
+    await adapter.on_processing_start(a)
+    await adapter.on_processing_start(b)
+    await adapter.send('alice', 'Correct answer B.', reply_to=b.message_id,
+                       metadata={'notify': True, 'reply_to_message_id': b.message_id})
+    await adapter.send('alice', 'Partial A', reply_to=None, metadata={'notify': True, 'reply_to_message_id': a.message_id})
+    await adapter.on_processing_complete(b, ProcessingOutcome.SUCCESS)
+    await adapter.on_processing_complete(a, ProcessingOutcome.SUCCESS)
+    assert replies(glasses) == [('B', 'Correct answer B.')]

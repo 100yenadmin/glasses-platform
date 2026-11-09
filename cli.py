@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import socket
+from urllib.parse import urlsplit
 
 from .devices import parse_devices
 
@@ -111,12 +112,21 @@ def pair(args):
     if token not in str(_setting('devices') or ''):  # Hermes refuses .env writes on some managed installs
         print('Could not save the new device to the profile .env (see the message above). Nothing was paired.')
         return 1
-    url = connect_url(token, args.host, args.port, 'wss' if args.wss else 'ws')
+    xiaozhi = getattr(args, 'xiaozhi', False)
+    scheme = ('https' if args.wss else 'http') if xiaozhi else ('wss' if args.wss else 'ws')
+    url = connect_url(token, args.host, args.port, scheme)
+    if xiaozhi:
+        parts = urlsplit(url)
+        url = f'{parts.scheme}://{parts.netloc}/xiaozhi/ota/{token}'
     print(f'Paired {user}:{device}. It shares one conversation with every other device of {user}.\n')
-    picture = None if args.no_qr else _qr(url)
+    picture = None if args.no_qr or xiaozhi else _qr(url)
     if picture:
         print(picture + '\n')
-    print(f'Connect URL (open it in the glasses app, or scan the code):\n  {url}\n')
+    if xiaozhi:
+        print(f'OTA address:\n  {url}\n')
+        print('Paste it into the device Wi-Fi setup page: "OTA address" under advanced settings; then push to talk.')
+    else:
+        print(f'Connect URL (open it in the glasses app, or scan the code):\n  {url}\n')
     print('Anyone with this URL can talk to your agent: keep it private. Revoke it with '
           f'`hermes glasses revoke {user} {device}`.')
     print('Restart the gateway to load the new device: `hermes gateway restart`.')
@@ -208,6 +218,7 @@ def setup(parser):
     p.add_argument('--host', help='Address the device should connect to (default: this machine on the LAN)')
     p.add_argument('--port', type=int, help='Port in the URL (default: the configured port, 8765)')
     p.add_argument('--wss', action='store_true', help='Print a wss:// URL, for a TLS proxy in front of the gateway')
+    p.add_argument('--xiaozhi', action='store_true', help='Print an ESP32 xiaozhi OTA address instead of a QR code')
     p.add_argument('--replace', action='store_true', help='Give an already paired device a new token')
     p.add_argument('--no-qr', action='store_true', help='Print the URL only')
     p.set_defaults(glasses_func=pair)

@@ -7,9 +7,10 @@ Plugin id and repository: `glasses-platform`.
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.4.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.5.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
-> `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
+> `main`. Each device path below was run against a real Hermes gateway with a simulated device; no real glasses,
+> watch or voice box has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
 
 ## What it is
@@ -44,14 +45,19 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 - **Set up in one command, try it without glasses.** `hermes glasses pair` prints a connect URL and QR code;
   `hermes glasses try` talks to your agent from the terminal as a pair of glasses with a camera.
 
-## Planned support
+## Devices
 
-| Glasses | Path |
-|---|---|
-| Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | A phone app on Meta's Wearables Device Access Toolkit. The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode; not yet tested against this plugin on a device. |
-| Even Realities G2 | Even Hub app (M4) |
-| Mentra Live | Mentra cloud app (M4) |
-| Meta AI on glasses | Meta AI Connectors endpoint (M4, gated on Meta early access) |
+| Device | How it connects | Checked |
+|---|---|---|
+| Even Realities G2 glasses | [Even Hub app](clients/even-g2/README.md): tap to talk, answers on the lens, touchpad approvals, reminders | Even Hub simulator + real gateway |
+| ESP32 voice boxes (xiaozhi firmware, 138+ boards) | [OTA pairing and the xiaozhi voice protocol](#esp32-voice-boxes-xiaozhi) | Simulated device + real gateway |
+| Omi pendant | [Real-time transcript webhook](#omi-pendant): "Hey Hermes, …" | Webhook calls + real gateway |
+| Pebble watches | [The open-source Bobby app](#pebble-bobby) with a two-line URL override | Bobby-protocol client + real gateway |
+| Apple Watch, Siri Shortcuts, scripts | [HTTP route](docs/devices/apple-watch.md): `POST /turn`, `GET /pending` | Real gateway |
+| Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode | Bundled v0 simulator |
+| Your own client | [JavaScript client](clients/js/hermes-glasses.js), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
+
+Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
 
 ## Install
 
@@ -80,6 +86,17 @@ hermes gateway restart             # the gateway loads devices when it starts
 
 The URL points at this machine on your local network. Pass `--host` for another address (for example a Tailscale
 name) and `--wss` behind a TLS proxy.
+
+## ESP32 voice boxes (xiaozhi)
+
+Run `hermes glasses pair me voicebox --xiaozhi` (add `--host` / `--port` if needed), then restart the gateway.
+Paste the printed OTA address into the device's Wi-Fi setup page, under advanced settings → "OTA address".
+Push to talk and hear the answer; server speech needs `ffmpeg` installed on the gateway.
+Reminders play the next time the device opens its connection: xiaozhi devices only connect while talking.
+They stay in the outbox until the bridge sends the normal playback `tts stop`; aborted or disconnected playback
+is queued again on disconnect. This records socket delivery, not proof that the device played the sound.
+Recordings stop at 15 seconds or 240,000 encoded Opus bytes (15 s × 16 kB/s). Opus packets over 1,500 bytes are
+ignored; WebSocket messages are limited to 64 KiB. Ogg container work at 32 KiB or above runs in a worker thread.
 
 <details><summary>Setting tokens by hand</summary>
 
@@ -111,6 +128,53 @@ The plugin refuses to start without at least one token. It listens on all interf
 
 To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. The plugin does not terminate TLS.
 
+## Omi pendant
+
+1. Pair with `hermes glasses pair me omi`, keep the token from the pairing URL, then run `hermes gateway restart`.
+2. In Omi → Settings → Developer Mode → Developer Settings → Real-Time Transcript Webhook, paste `https://<public-host>/omi/<device-token>/transcript`.
+3. Start a live Omi conversation and say “Hey Hermes, what time is it?”; the answer arrives as an Omi notification.
+4. Say “Hey Hermes, yes” or “Hey Hermes, no” for approvals; reminders sent to `glasses:me` arrive while the conversation is live.
+
+Omi's servers call this URL, so it must be reachable from the internet through an HTTPS reverse proxy or
+Tailscale Funnel. Keep the URL private and keep tokens out of proxy access logs. The plugin makes no outbound
+Omi calls. Replies taking longer than `omi_wait` seconds (default 20, `GLASSES_OMI_WAIT`) wait for the next
+transcript call, as do pushes sent while the pendant is offline. Messages start with `Hermes: ` so even short
+answers display. Within 1000 characters, items appear oldest first; an item that exceeds the remaining room
+keeps its head and ends in `…`, counting as shown. Items with no room stay queued for the next call.
+When a call has no `is_user: true` segment, every speaker counts, so anyone nearby can answer an approval.
+Overlapping webhook calls can show the same push twice. Session buffers expire after ten minutes idle and
+retain at most 256 segment keys and 32 sessions per device identity. This path is tested with fakes;
+no Omi account has been tested.
+
+## Pebble (Bobby)
+
+Build the open-source [Bobby assistant](https://github.com/pebble-dev/bobby-assistant) (Apache-2.0) with the Pebble
+SDK installed. Pair a device with `hermes glasses pair <user> pebble`, then create
+`app/src/pkjs/urls_override.js` in your Bobby checkout with exactly these two exports (use your plugin device token):
+
+```javascript
+exports.QUERY_URL = 'wss://<host>/bobby/<token>/query';
+exports.QUOTA_URL = 'https://<host>/bobby/<token>/quota';
+```
+
+From the Bobby checkout, build and install with the phone's developer connection enabled:
+
+```sh
+cd app
+npm install
+pebble build
+pebble install --phone <phone-ip>
+```
+
+The phone must reach the gateway through Tailscale or an HTTPS proxy; Pebble's JavaScript needs `wss`/`https` for
+non-local hosts. The proxy must forward WebSocket upgrades. Keep the device URL private. Ask a question on the
+watch: Hermes streams its answer, followed by queued reminders and pushes. Approval or clarify questions appear
+as text; ask “yes” or “no” next. After `bobby_wait` seconds (`GLASSES_BOBBY_WAIT`, default 45), Bobby finishes with
+a still-working message; the late answer is queued for your next question.
+
+Bobby's own widgets and actions (including watch timers and reminders) are unsupported. Hermes reminders appear
+as plain text with the next answer. This endpoint has aiohttp client tests; a real-watch session is still needed.
+
 ## Try it
 
 **A demo gateway:** `demo/run_demo_gateway.sh <empty-dir>` starts an isolated Hermes gateway with this plugin, a
@@ -141,7 +205,8 @@ short offline queue until a device reconnects.
 ## What it does on your machine
 
 - **Opens a network listener.** A WebSocket server on all interfaces, port 8765, path `/voice`, plus the HTTP
-  routes `/turn`, `/pending` and `/approval` on the same port and with the same tokens (set `GLASSES_HOST`
+  routes `/turn`, `/pending`, `/approval`, `/omi/{token}/transcript`, `/xiaozhi/ota/{token}`, `/bobby/{token}/quota`
+  and the `/xiaozhi` and `/bobby/{token}/query` WebSockets on the same port and with the same tokens (set `GLASSES_HOST`
   to `127.0.0.1` to keep it local). It refuses to start until at least one device token is configured.
 - **A device token is full access to your agent.** Anyone holding one can chat with your agent as you, and can answer
   the approval prompts and clarify questions the agent sends to your devices. Keep tokens long, random and private.
@@ -175,3 +240,11 @@ short offline queue until a device reconnects.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Build a companion client
+
+The dependency-free [JavaScript client](clients/js/README.md) speaks protocol v1 over
+WebSocket or HTTP, with injectable transports for phone runtimes. The
+[conformance kit](conformance/README.md) checks a server or runs a scripted local
+server for client authors. Planned server features still depend on the installed
+server's advertised capabilities.

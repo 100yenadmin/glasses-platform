@@ -2,6 +2,29 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.5.0 (2026-11-09): one plugin for every non-desktop device
+
+- **JavaScript client** (`clients/js/hermes-glasses.js`): a dependency-free protocol v1 client for browsers, phones
+  and web views, with connect and reconnect, asks with timeouts, interrupts, approvals and photos. The G2 app uses it.
+- **Conformance kit** (`python -m conformance` from the repo root): `check-server` tests any gateway against the protocol;
+  a fake server tests a client.
+- **Omi pendant.** Say “Hey Hermes, …” in a live Omi conversation to ask your agent through
+  `POST /omi/{token}/transcript`. Answers, reminders and approval prompts return as Omi notifications; slow
+  replies wait for the next transcript call. See [Omi setup](README.md#omi-pendant).
+- **ESP32 voice boxes (xiaozhi).** Boards running the open-source xiaozhi firmware pair with
+  `hermes glasses pair me voicebox --xiaozhi` and the device's OTA address: push to talk with Opus audio, spoken
+  answers, abort, and reminders played the next time the device connects. See
+  [ESP32 voice boxes](README.md#esp32-voice-boxes-xiaozhi).
+- **Even Realities G2 glasses.** An Even Hub app in `clients/even-g2`: tap the touchpad to talk, read the answer
+  on the lens as it streams, see reminders, and answer approvals from a list of Hermes's choices. You pack it with your own
+  gateway address. See [the G2 client](clients/even-g2/README.md).
+- **Pebble watch (Bobby).** Build the open-source Bobby assistant with a two-line `urls_override.js` pointing at
+  this plugin: Hermes answers stream to the watch, approval questions arrive as text, and queued reminders follow
+  the next answer. See [Pebble (Bobby)](README.md#pebble-bobby).
+- **Reused query ids are answered.** Hermes refuses an old message id that arrives with new text, so a device that
+  restarted its id counter (`q1`, `q2`, …) used to wait forever. Each query now reaches Hermes under a fresh id;
+  devices still see their own ids on every reply.
+
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
 - **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it

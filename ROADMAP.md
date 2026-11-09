@@ -73,9 +73,9 @@ connect. See [docs/DEVICES.md](docs/DEVICES.md) for the device survey behind thi
 - [x] HTTP route (0.4.0) next to the WebSocket, same tokens: `POST /turn` (text or audio in, one short reply out) and a
   long-poll `GET /pending` for pushes and approvals. For devices that cannot hold a WebSocket: Apple Watch
   (watchOS allows HTTP(S) requests but WebSockets only during audio or calls), Garmin, Siri Shortcuts, polling clients.
-- [ ] Conformance kit: the simulator's scenarios as a test any client can run against a server, so a third-party
-  app can show it works with Hermes.
-- [ ] Small client libraries: JavaScript (browser, Even Hub, Pebble's phone-side JS) and Python first.
+- [x] Conformance kit (0.5.0): the simulator's scenarios as a test any client can run against a server, so a
+  third-party app can show it works with Hermes.
+- [ ] Small client libraries: JavaScript done (0.5.0, used by the G2 app); Python next.
 
 **Exit criteria:** the conformance kit passes against the plugin over both the WebSocket and the HTTP route, and
 two different device classes complete a real-device session.
@@ -88,12 +88,16 @@ rates. Simulator runs prove the server side only.
 - **M5 — Apple Watch and Siri Shortcuts** (largest smartwatch base): a Shortcut on the HTTP route first (tested on a
   real watch), then a watchOS app with push notifications.
 - **M6 — ESP32 voice boxes:** a xiaozhi-compatible endpoint (its WebSocket hello, Opus audio, abort), covering the
-  138+ boards of the open-source xiaozhi firmware. Needs M1 voice in and out.
+  138+ boards of the open-source xiaozhi firmware. Server side shipped in 0.5.0; a real board session remains open.
 - **M7 — Even Realities G2:** an Even Hub web app on our protocol (glasses mic, display, touchpad and ring for
-  approvals, pushes). Beta testers need no store review.
-- **M8 — Omi pendant:** an Omi app that receives live transcripts by webhook and feeds the user's session.
+  approvals, pushes). Beta testers need no store review. Client in `clients/even-g2/` (0.5.0),
+  checked in the Even Hub simulator against a real gateway; a real-glasses session remains open ([#24](https://github.com/100yenadmin/glasses-platform/issues/24)).
+- **M8 — Omi pendant:** an Omi app that receives live transcripts by webhook and feeds the user's session. Webhook
+  shipped in 0.5.0; a real Omi session remains open.
 - **M9 — Android: Wear OS and Android Auto:** one Android reference client; Android Auto shows its messages.
-- **M10 — Pebble:** point the open-source Bobby assistant's phone-side WebSocket at our protocol.
+- **M10 — Pebble** ([#27](https://github.com/100yenadmin/glasses-platform/issues/27)): Bobby-compatible query and
+  quota endpoints shipped in 0.5.0, with streamed answers, queued pushes and build instructions; live-tested with a
+  Bobby-protocol client against a real gateway. A real-watch session remains open.
 - **M11 — Mentra glasses:** Mentra Live and MentraOS (also G1, G2 and Vuzix through MentraOS).
 
 Meta Ray-Ban stays M2 (via hermes-glasses); public reach waits on Meta opening its device toolkit. The Meta AI
