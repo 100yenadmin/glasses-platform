@@ -112,6 +112,39 @@ async def test_new_stream_segment_is_forwarded(server, monkeypatch):
     assert [part for part in result if part.startswith('c')] == ['cLooking.', 'cThe answer', 'c is 42.']
 
 
+async def test_delta_arriving_during_socket_send_is_not_skipped(server, monkeypatch):
+    adapter, client = server
+    resume = asyncio.Event()
+    connection = []
+    send = pebble.web.WebSocketResponse.send_str
+
+    async def query(conn, frame):
+        connection.append((conn, frame['id']))
+        await conn.send_json({'type': 'response_delta', 'turn': frame['id'], 'text': 'Hello'})
+        await resume.wait()
+        await adapter._deliver_reply('alice', conn, frame['id'], 'Hello world!')
+
+    async def concurrent(ws, data, *args, **kwargs):
+        await send(ws, data, *args, **kwargs)
+        if data == 'cHello':
+            conn, turn_id = connection[0]
+            await conn.send_json({'type': 'response_delta', 'turn': turn_id, 'text': 'Hello world'})
+    monkeypatch.setattr(adapter, '_process_query', query)
+    monkeypatch.setattr(pebble.web.WebSocketResponse, 'send_str', concurrent)
+    ws = await client.ws_connect(QUERY, params={'prompt': 'hi'})
+    try:
+        assert (await ws.receive()).data == 'fThinking…'
+        assert (await ws.receive()).data == 'cHello'
+        assert (await ws.receive(timeout=0.25)).data == 'c world'
+        resume.set()
+        result = [message.data async for message in ws]
+        assert result[:2] == ['c!', 'd'] and result[2].startswith('t')
+        assert ws.close_code == 1000
+    finally:
+        resume.set()
+        await ws.close()
+
+
 async def test_widgets_are_stripped_even_across_stream_boundaries(server, monkeypatch):
     adapter, client = server
     widget = '<<!!WIDGET:{"timer":\n10}!!>>'

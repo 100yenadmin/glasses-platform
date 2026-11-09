@@ -90,10 +90,11 @@ class BobbyApi:
             while not conn.ws.closed:
                 await _wait_for(conn.ws, lambda items: len(items) > cursor,
                                 max(0, deadline - asyncio.get_running_loop().time()))
-                for frame in conn.ws.frames[cursor:]:
+                pending = conn.ws.frames[cursor:]
+                cursor += len(pending)  # sends yield: frames appended during them belong to the next batch
+                for frame in pending:
                     if frame.get('type') == 'response_delta' and frame.get('turn') == turn_id:
                         await chunk(frame.get('text', ''))
-                cursor = len(conn.ws.frames)
                 if _terminal(conn.ws.frames, turn_id, start) is not None:
                     break
                 if asyncio.get_running_loop().time() >= deadline:
