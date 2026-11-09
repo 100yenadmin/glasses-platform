@@ -5,7 +5,7 @@
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.2.1 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.3.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
@@ -27,7 +27,7 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 - **Ask about what you see.** "What am I looking at?" takes a photo through the glasses before the question reaches
   the model. The agent can also decide to look by itself with its `glasses_capture_photo` tool.
 - **Hear back later.** Reminders, cron jobs and heartbeat results arrive on your glasses as pushes. If no device is
-  connected they wait, and arrive when one reconnects.
+  connected they wait, even across a gateway restart, and arrive when one reconnects.
 - **Approve by voice.** When the agent wants to run a dangerous command, the glasses ask "Hermes wants to run: …
   Say yes to allow it once, or no to block it." A spoken yes or no answers that one request.
 - **One conversation on every device.** Glasses and phone share one Hermes session per person: memory, schedules and
@@ -145,8 +145,9 @@ short offline queue until a device reconnects.
 - **No third-party calls.** The plugin makes no outbound network requests, runs no shell commands, sends no telemetry
   and starts no background processes beyond its listener.
 - **Tokens** are read through Hermes's per-profile settings reader, from `~/.hermes/.env` or `config.yaml`.
-- **Offline queue.** Pushes for a disconnected device wait in memory (50 items, 24 hours) and are lost on a gateway
-  restart.
+- **Offline queue.** Pushes for a disconnected device wait (50 items, 24 hours) in memory and in
+  `~/.hermes/glasses/outbox.json` (readable only by you), so they survive a gateway restart. A message leaves the file
+  when it is handed to a device. `GLASSES_OUTBOX_PERSIST=off` keeps the queue in memory only.
 
 ## Why a plugin rather than a bridge script
 
