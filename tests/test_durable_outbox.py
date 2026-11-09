@@ -110,3 +110,22 @@ def test_persistence_can_be_turned_off(make_adapter):
     adapter = make_adapter(outbox_persist='off')
     assert adapter.outbox.path is None
     assert make_adapter().outbox.path.name == 'outbox.json'
+
+
+@pytest.mark.asyncio
+async def test_a_push_pending_a_new_connections_first_flush_survives_a_crash(make_adapter):
+    from aiohttp.test_utils import TestClient, TestServer
+    adapter = make_adapter()
+    await adapter.connect()
+    client = TestClient(TestServer(adapter._app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect('/voice', params={'token': 'tok-alice-1'})
+        await until(ws, 'welcome')  # no hello yet: the protocol is not settled, pushes wait for the flush
+        await adapter.send('alice', 'Reminder: gate 42.', metadata={'job_id': 'j1'})
+        assert adapter.registry.live('alice')[0].pending
+        assert [i[1] for i in make_adapter().outbox.drain('alice')] == ['Reminder: gate 42.']
+        await ws.close()
+    finally:
+        await adapter.disconnect()
+        await client.close()
