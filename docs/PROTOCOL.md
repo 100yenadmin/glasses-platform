@@ -224,6 +224,36 @@ device tokens (`Authorization: Bearer <token>`, or `?token=`). Bodies are JSON.
   that could not be written): drop repeats by `id`.
 - Status codes: `401` bad or missing token, `400` malformed body, `413` too large, `202` still running.
 
+## Omi webhook
+
+Set Omi's **Real-Time Transcript Webhook** to `https://<public-host>/omi/<device-token>/transcript`.
+Omi's backend must reach it over the internet (an HTTPS reverse proxy or Tailscale Funnel); local network
+access alone is insufficient. See [setup](../README.md#omi-pendant). The plugin makes no outbound Omi calls.
+
+- Omi calls `POST /omi/{token}/transcript?session_id=<id>&uid=<omi-user-id>` repeatedly during a live
+  conversation. The path token uses the same authentication as the WebSocket and decides the Hermes user
+  and device. `uid` is ignored; `session_id` only groups transcript segments for that authenticated device.
+- The body is a JSON **array**, for example
+  `[{"text":"Hey Hermes, what time is it","speaker":"SPEAKER_00","speakerId":0,"is_user":true,"start":0,"end":2}]`.
+  Malformed JSON or segments get `400`, a bad token gets `401`, and the listener's body limit still applies (`413`).
+- A segment starting with “hey hermes” or “hermes” starts a question, ignoring case, punctuation and a
+  leading “ok” or “okay”. The following words become the query. A wake phrase alone arms an eight-second
+  window for subsequent segments in that session; eligible segments in the completing call are joined.
+  A call with any `is_user:true` segments uses only those segments; otherwise all speakers count.
+  Repeated segments with the same start time and text are ignored within that device's session.
+- Each question is an ordinary v1 query on a short-lived connection with capabilities `{}`. The webhook
+  waits up to `omi_wait` seconds (`GLASSES_OMI_WAIT`, default 20) for its reply or an approval/clarify prompt.
+  It always answers a valid call with `200`: `{"message":"<text>"}` when there is text, otherwise `{}`.
+  Omi displays a notification when `message` is longer than five characters. A late reply becomes a queued
+  push for a later call. Approval prompts use the existing spoken path: “Hey Hermes, yes” or “Hey Hermes, no”.
+- Every call, including an empty array or one without a wake phrase, flushes this user's queued pushes.
+  Pushes and replies are joined in arrival order (newest last), separated by blank lines, and limited to the
+  newest 1000 characters. Only complete pushes included in the successfully written answer are acknowledged;
+  clipped or omitted pushes stay queued. If a write fails, pushes and replies are queued again. The same
+  HTTP finish-under-lock and release helpers keep pushes arriving at the deadline for the next call.
+- Delivery requires transcript calls: while the pendant is offline or no live conversation is running,
+  messages wait in the normal outbox. This route does not replace a WebSocket or another open request.
+
 ## Limits
 
 - **Frame size:** the server's maximum is 8 MB by default (`GLASSES_MAX_FRAME_MB`). Downscale photos to about

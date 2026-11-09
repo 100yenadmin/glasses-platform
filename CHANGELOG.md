@@ -4,6 +4,9 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
 
 ## 0.4.0 (2026-11-09): voice, approval buttons and an HTTP route
 
+- **Omi pendant.** Say “Hey Hermes, …” in a live Omi conversation to ask your agent through
+  `POST /omi/{token}/transcript`. Answers, reminders and approval prompts return as Omi notifications; slow
+  replies wait for the next transcript call. See [Omi setup](README.md#omi-pendant).
 - **Voice in and out.** A v1 device can send a recording (`query.audio`); Hermes's own speech-to-text transcribes it
   and the words are handled exactly like typed text (spoken approvals and photo questions still work). Devices that
   declare `audio_out` get each answer and push as audio from Hermes's own text-to-speech.
