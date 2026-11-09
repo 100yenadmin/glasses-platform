@@ -5,6 +5,12 @@ The transcript and streamed answer appear on the lens. Reminders and Hermes push
 Approvals show Hermes's choices in a touchpad list: scroll up/down, click to answer. Another device answering closes it.
 Double-tap exits. Foreground only; no speaker, camera or haptics. The phone page mirrors the lens and has settings.
 
+Lens captures from the official Even Hub simulator, talking to a real Hermes gateway:
+
+| Answer | Approval (touchpad) | Reminder |
+|---|---|---|
+| ![Answer on the lens](docs/answer.png) | ![Approval choices](docs/approval-list.png) | ![Reminder push](docs/reminder.png) |
+
 ## Develop and side-load
 
 From this directory: `npm install`, then `npm run dev` (port 5173, fails if occupied).
