@@ -41,7 +41,7 @@ async def test_bad_path_token_cannot_be_overridden(server):
 @pytest.mark.parametrize('text', ['talking to somebody', 'ask Hermes tomorrow', 'hermesian weather', 'hey hermesville',
                                  "Hermes's docs are great", 'Hermes’s docs are great',
                                  "Hermes 's docs are great", 'Hermes ’s docs are great',
-                                 'Hermes: tell me the time', 'Hermes! tell me the time'])
+                                 ])
 async def test_no_wake_phrase_is_not_a_query(server, text):
     adapter, client = server
     adapter._process_query = AsyncMock()
@@ -52,7 +52,8 @@ async def test_no_wake_phrase_is_not_a_query(server, text):
 
 
 @pytest.mark.parametrize('wake', ['Hey Hermes, ', 'hermes ', 'OK, HEY HERMES, ', 'Okay... Hermes, — ',
-                                 '“Hey, Hermes,” '])
+                                 '“Hey, Hermes,” ', 'Hey Hermes. ', 'Hey, Hermes? ', 'Hermes: ', 'OK, HEY HERMES! ',
+                                 'hermes\t'])
 async def test_wake_becomes_existing_v1_query_and_reply(server, monkeypatch, wake):
     adapter, client = server
     connections = watch_connections(adapter, monkeypatch)
@@ -204,15 +205,22 @@ async def test_failed_answer_retains_push_and_reply(server, monkeypatch):
     assert not adapter.outbox._inflight
 
 
-async def test_message_trimming_acknowledges_truncated_push_and_queues_unshown(server):
+async def test_message_trimming_keeps_whole_items_and_queues_the_rest(server):
     adapter, client = server
-    oldest, partial, newest = 'A' * 500, 'B' * 600, 'C' * 600
-    for text in (oldest, partial, newest):
+    oldest, middle, newest = 'A' * 500, 'B' * 600, 'C' * 300
+    for text in (oldest, middle, newest):
         await adapter.send('alice', text)
-    result = await post(client)
-    assert result == {'message': 'Hermes: ' + oldest + '\n\n' + partial[:489] + '…'}
-    assert len(result['message']) == 1000
-    assert await post(client) == {'message': 'Hermes: ' + newest}
+    assert await post(client) == {'message': 'Hermes: ' + oldest}  # the middle does not fit: it and the rest wait
+    assert await post(client) == {'message': 'Hermes: ' + middle + '\n\n' + newest}
+    assert await post(client) == {}
+
+
+async def test_in_time_reply_after_a_long_push_is_queued_whole(server):
+    adapter, client = server
+    await adapter.send('alice', 'P' * 900)
+    reply_with(adapter, 'R' * 300)
+    assert await post(client, segment('Hermes, answer me')) == {'message': 'Hermes: ' + 'P' * 900}
+    assert await post(client) == {'message': 'Hermes: ' + 'R' * 300}
     assert await post(client) == {}
 
 

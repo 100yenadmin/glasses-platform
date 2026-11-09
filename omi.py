@@ -9,7 +9,7 @@ from gateway.platforms._shared import extra_or_secret
 from .devices import Connection, authenticate
 from .http_api import HttpSocket, _finish, _is_push, _reply, _requeue, _send, _terminal, _wait_for
 
-WAKE = re.compile(r"^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes(?=,|$| (?!['’]s))[\W_]*", re.IGNORECASE)
+WAKE = re.compile(r"^[\W_]*(?:(?:okay|ok)[\W_]+)?(?:hey[\W_]+)?hermes(?!\s*['’]\s*s\b)\b[\W_]*", re.IGNORECASE)
 FOLLOWUP_SECONDS = 8
 MESSAGE_LIMIT = 1000
 MESSAGE_PREFIX = 'Hermes: '
@@ -77,7 +77,8 @@ class OmiApi:
 
     @staticmethod
     def _answer(frames, turn_ids):
-        # Keep arrival order and each item's head; even a clipped item counts as shown.
+        # Keep arrival order. Only an item too long on its own is clipped (its head shows, and it counts as shown);
+        # an item that does not fit after others stays out, with everything after it, for the next call.
         parts, shown, length = [], [], len(MESSAGE_PREFIX)
         for frame in frames:
             if not (_is_push(frame) or frame.get('type') == 'response' and frame.get('turn') in turn_ids
@@ -91,6 +92,8 @@ class OmiApi:
             if room <= 0:
                 break
             if len(text) > room:
+                if parts:
+                    break
                 text = text[:room - 1] + '…'
             parts.append(text)
             shown.append(frame)
