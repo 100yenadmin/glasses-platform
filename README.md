@@ -7,7 +7,7 @@ Plugin id and repository: `glasses-platform`.
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.5.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.5.1 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. Each device path below was run against a real Hermes gateway with a simulated device; no real glasses,
 > watch or voice box has been tested yet. Read the [design plan](docs/PLAN.md), the
@@ -62,9 +62,9 @@ Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connect
 ## Install
 
 Requirements:
-- Hermes Agent 0.22.2 or later. The plugin needs `aiohttp`, which is declared in `pyproject.toml`. If your Hermes
-  was installed without the `messaging` extra, `hermes plugins install` asks to install it. Without a terminal,
-  pass `--yes-deps`.
+- Hermes Agent 0.22.2 or later. The plugin needs `aiohttp` and `qrcode`, declared in `pyproject.toml`. Run the
+  install in a terminal and answer `y` when Hermes asks to prepare them; scripts add `--yes-deps`. Without either,
+  the plugin installs but stays disabled.
 - In-process plugin loading, which is the default. The opt-in `plugins.isolation: host` mode cannot load platform plugins.
 
 ```bash

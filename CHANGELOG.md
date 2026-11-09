@@ -2,6 +2,12 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.5.1 (2026-11-09): the pairing QR code on a fresh install
+
+`hermes glasses pair` printed only the connect URL on a fresh Hermes install: the plugin runs in Hermes's own
+plugin environment, which has no `qrcode` package. `qrcode` is now a declared dependency, so the QR code appears.
+The README says to answer `y` when Hermes asks to prepare dependencies (scripts add `--yes-deps`).
+
 ## 0.5.0 (2026-11-09): one plugin for every non-desktop device
 
 - **JavaScript client** (`clients/js/hermes-glasses.js`): a dependency-free protocol v1 client for browsers, phones
