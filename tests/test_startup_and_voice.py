@@ -39,6 +39,11 @@ async def queued_then_replayed(adapter, event):
     await adapter.on_processing_start(event)
 
 
+def _wire_id(value):
+    from glasses_plugin.adapter import _wire_id as wire
+    return wire(value)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('confirm', [True, False])
 async def test_new_session_queued_at_startup_is_acknowledged_once_when_it_runs(server, confirm):
@@ -50,7 +55,7 @@ async def test_new_session_queued_at_startup_is_acknowledged_once_when_it_runs(s
     event = adapter.handle_message.call_args.args[0]
     await adapter.on_processing_start(event)
     await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
-    assert glasses.ws.frames == [] and event.message_id in adapter._resets  # only queued: nothing to answer yet
+    assert glasses.ws.frames == [] and _wire_id(event.message_id) in adapter._resets  # only queued: nothing to answer yet
     event._hermes_startup_restore_replay = True
     await adapter.on_processing_start(event)
     if confirm:
@@ -171,7 +176,7 @@ async def test_a_busy_notice_for_another_query_does_not_count_as_the_reset_runni
     await adapter.on_processing_start(event)
     await adapter.send('alice', 'Still working on your last message.', reply_to='another-query')
     await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
-    assert glasses.ws.frames == [] and event.message_id in adapter._resets
+    assert glasses.ws.frames == [] and _wire_id(event.message_id) in adapter._resets
 
 
 @pytest.mark.asyncio
