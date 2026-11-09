@@ -214,7 +214,7 @@ test('#44 review: two questions in one turn; the deadline follows the latest ans
   socket.frame({type: 'push', origin: 'clarify', text: 'Lock it now?'});
   await talk(app, [3]);
   const second = socket.sent.at(-1);
-  t.mock.timers.tick(180001); await flush();  // the first ask and the first answer have both timed out
+  t.mock.timers.tick(80001); await flush();  // t≈280 s: the first ask (180 s) and the first answer (280 s) have timed out
   assert.ok(!views.some(([kind]) => kind === 'error'));
   socket.frame({type: 'response', turn: second.id, text: 'Locked the back door now.'}); await flush();
   assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door now.')));
