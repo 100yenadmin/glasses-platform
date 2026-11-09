@@ -15,8 +15,11 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
   answers, abort, and reminders played the next time the device connects. See
   [ESP32 voice boxes](README.md#esp32-voice-boxes-xiaozhi).
 - **Even Realities G2 glasses.** An Even Hub app in `clients/even-g2`: tap the touchpad to talk, read the answer
-  on the lens as it streams, see reminders, and answer approvals from a Yes/No list. You pack it with your own
+  on the lens as it streams, see reminders, and answer approvals from a list of Hermes's choices. You pack it with your own
   gateway address. See [the G2 client](clients/even-g2/README.md).
+- **Pebble watch (Bobby).** Build the open-source Bobby assistant with a two-line `urls_override.js` pointing at
+  this plugin: Hermes answers stream to the watch, approval questions arrive as text, and queued reminders follow
+  the next answer. See [Pebble (Bobby)](README.md#pebble-bobby).
 - **Reused query ids are answered.** Hermes refuses an old message id that arrives with new text, so a device that
   restarted its id counter (`q1`, `q2`, …) used to wait forever. Each query now reaches Hermes under a fresh id;
   devices still see their own ids on every reply.

@@ -140,6 +140,35 @@ Overlapping webhook calls can show the same push twice. Session buffers expire a
 retain at most 256 segment keys and 32 sessions per device identity. This path is tested with fakes;
 no Omi account has been tested.
 
+## Pebble (Bobby)
+
+Build the open-source [Bobby assistant](https://github.com/pebble-dev/bobby-assistant) (Apache-2.0) with the Pebble
+SDK installed. Pair a device with `hermes glasses pair <user> pebble`, then create
+`app/src/pkjs/urls_override.js` in your Bobby checkout with exactly these two exports (use your plugin device token):
+
+```javascript
+exports.QUERY_URL = 'wss://<host>/bobby/<token>/query';
+exports.QUOTA_URL = 'https://<host>/bobby/<token>/quota';
+```
+
+From the Bobby checkout, build and install with the phone's developer connection enabled:
+
+```sh
+cd app
+npm install
+pebble build
+pebble install --phone <phone-ip>
+```
+
+The phone must reach the gateway through Tailscale or an HTTPS proxy; Pebble's JavaScript needs `wss`/`https` for
+non-local hosts. The proxy must forward WebSocket upgrades. Keep the device URL private. Ask a question on the
+watch: Hermes streams its answer, followed by queued reminders and pushes. Approval or clarify questions appear
+as text; ask “yes” or “no” next. After `bobby_wait` seconds (`GLASSES_BOBBY_WAIT`, default 45), Bobby finishes with
+a still-working message; the late answer is queued for your next question.
+
+Bobby's own widgets and actions (including watch timers and reminders) are unsupported. Hermes reminders appear
+as plain text with the next answer. This endpoint has aiohttp client tests; a real-watch session is still needed.
+
 ## Try it
 
 **A demo gateway:** `demo/run_demo_gateway.sh <empty-dir>` starts an isolated Hermes gateway with this plugin, a
@@ -170,8 +199,8 @@ short offline queue until a device reconnects.
 ## What it does on your machine
 
 - **Opens a network listener.** A WebSocket server on all interfaces, port 8765, path `/voice`, plus the HTTP
-  routes `/turn`, `/pending`, `/approval`, `/omi/{token}/transcript`, `/xiaozhi/ota/{token}` and the `/xiaozhi`
-  WebSocket on the same port and with the same tokens (set `GLASSES_HOST`
+  routes `/turn`, `/pending`, `/approval`, `/omi/{token}/transcript`, `/xiaozhi/ota/{token}`, `/bobby/{token}/quota`
+  and the `/xiaozhi` and `/bobby/{token}/query` WebSockets on the same port and with the same tokens (set `GLASSES_HOST`
   to `127.0.0.1` to keep it local). It refuses to start until at least one device token is configured.
 - **A device token is full access to your agent.** Anyone holding one can chat with your agent as you, and can answer
   the approval prompts and clarify questions the agent sends to your devices. Keep tokens long, random and private.
