@@ -5,7 +5,7 @@
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.3.0 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.3.1 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
@@ -74,7 +74,8 @@ name) and `--wss` behind a TLS proxy.
 
 <details><summary>Setting tokens by hand</summary>
 
-Tokens map to `user:device`, and all devices of one user share the same conversation. Put this in `~/.hermes/.env`:
+Each entry names a user and a device (`user:device=...`); all devices of one user use one Hermes session.
+Add a line like this to the profile's environment file:
 
 ```bash
 GLASSES_DEVICES=me:rayban=<long-random-token>,me:g2=<another-token>
@@ -96,7 +97,7 @@ streaming:
 Photo turns need a model that can see: either a main model that accepts images, or an `auxiliary.vision` model in
 `config.yaml`.
 
-The plugin refuses to start without at least one token. It listens on `0.0.0.0:8765` at `/voice` by default.
+The plugin refuses to start without at least one token. It listens on all interfaces, port 8765, path `/voice`, by default.
 `GLASSES_HOST`, `GLASSES_PORT` and the other settings are listed in [docs/PLAN.md](docs/PLAN.md#6-configuration).
 
 To use it away from home Wi-Fi, put it behind Tailscale or a TLS reverse proxy. The plugin does not terminate TLS.
@@ -144,7 +145,7 @@ short offline queue until a device reconnects.
   devices already set there or in `config.yaml`), and prints the connect URL. `revoke` removes one.
 - **No third-party calls.** The plugin makes no outbound network requests, runs no shell commands, sends no telemetry
   and starts no background processes beyond its listener.
-- **Tokens** are read through Hermes's per-profile settings reader, from `~/.hermes/.env` or `config.yaml`.
+- **Device credentials** are read through Hermes's per-profile settings reader (the profile's environment file or `config.yaml`).
 - **Offline queue.** Pushes for a disconnected device wait (50 items, 24 hours) in memory and in
   `~/.hermes/glasses/outbox.json` (readable only by you), so they survive a gateway restart, even a crash. A message leaves
   the file once it has been sent to a device. `GLASSES_OUTBOX_PERSIST=off` keeps the queue in memory only.
