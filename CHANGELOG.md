@@ -2,6 +2,16 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.1 (2026-11-10): a clearer README
+
+- **Install, pair and try on the first screen.** The README opens with the install command in its short
+  `owner/repo` form, what to answer when Hermes asks about dependencies, and three steps to a first answer without
+  glasses. A demo link, badges and the "not yet tested on real glasses" status sit above them.
+- **Settings, tools and troubleshooting.** A table of the main settings, the three agent tools, the security notes
+  next to pairing (a device token bypasses the gateway allowlist; the listener is unencrypted by default), a
+  troubleshooting list, a bug route that keeps tokens out of reports, and a private security reporting link. No
+  code changes.
+
 ## 0.6.0 (2026-11-09): a Python client for your own devices
 
 - **Python device client.** `clients/python/hermes_glasses.py` lets a Raspberry Pi gadget, a script, a desktop tool
