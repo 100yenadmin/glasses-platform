@@ -69,6 +69,12 @@ class Approval:
     shown: bool = False  # its question has gone out to the devices (or the outbox)
 
 
+def _outbox_path():
+    """The profile's own file for pushes waiting for an offline device."""
+    from hermes_constants import get_hermes_home
+    return get_hermes_home() / 'glasses' / 'outbox.json'
+
+
 def _as_media(metadata):
     return {**(metadata or {}), 'glasses_media': True}
 
@@ -132,7 +138,9 @@ class GlassesAdapter(BasePlatformAdapter):
         self._hold_seconds = float(setting('push_hold_seconds', 120))
         self._max_frame_mb = float(setting('max_frame_mb', 8))
         self.registry = Registry()
-        self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)))
+        keep = str(setting('outbox_persist', 'true')).strip().lower() not in ('0', 'false', 'no', 'off')
+        self.outbox = Outbox(int(setting('outbox_max', 50)), float(setting('outbox_ttl_hours', 24)),
+                             path=_outbox_path() if keep else None)
         self.broker = PhotoBroker(self._max_frame_mb)
         self._tokens, self._active_turn, self._user_locks = {}, {}, {}
         self._queries, self._delivered = {}, {}  # recent query id -> device; user -> recently delivered push ids
