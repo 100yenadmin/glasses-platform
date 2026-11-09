@@ -2,10 +2,13 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
-## Unreleased
+## 0.6.0 (2026-11-09): a Python client for your own devices
 
-- **Python device client:** asyncio WebSocket and HTTP helpers with protocol v1, reconnect, correlated turns,
-  approvals and camera replies. See [the Python client](clients/python/README.md).
+- **Python device client.** `clients/python/hermes_glasses.py` lets a Raspberry Pi gadget, a script, a desktop tool
+  or a bridge to a microcontroller talk to your Hermes agent: asyncio WebSocket and HTTP helpers with protocol v1,
+  streamed answers, reminders, approvals, camera replies and reconnect. It passes the conformance kit's client
+  scenario and was checked against a real gateway (a text turn and a photo turn). See
+  [the Python client](clients/python/README.md).
 
 ## 0.5.2 (2026-11-09): answer Hermes's questions from the G2 glasses
 
