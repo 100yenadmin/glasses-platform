@@ -5,6 +5,7 @@ export interface Capabilities {
 export interface Media { data: string; mime: string; rate?: number }
 export interface Query {
   text?: string; audio?: Media; image?: Media; speak?: boolean; id?: string;
+  /** Total wait in ms; defaults to 180000. Zero disables the deadline. */
   timeout?: number; signal?: AbortSignal;
 }
 export interface Frame { type?: string; [field: string]: unknown }
@@ -40,7 +41,8 @@ export class HermesGlassesClient {
   disconnect(): void;
   ask(query?: Query): Promise<TurnResult>;
   newSession(): Promise<Frame>;
-  interrupt(id?: string): void;
+  /** Sends a fresh /stop turn and rejects the specified or oldest unanswered non-slash ask. */
+  interrupt(options?: {ask?: string}): void;
   answerApproval(id: string, choice: string): Promise<Frame>;
   sendPhoto(request: string, base64Jpeg: string): void;
   photoError(request: string, message: string): void;

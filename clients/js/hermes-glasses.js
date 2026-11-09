@@ -5,6 +5,7 @@ export class HermesGlassesClient {
     Object.assign(this, {url, token, device, app, reconnect, WebSocketImpl, onCapturePhoto});
     this.listeners = new Map();
     this.queries = new Map();
+    this.interrupts = new Set();
     this.approvals = new Map();
     this.sequence = 0;
     this.backoff = 1000;
@@ -26,8 +27,10 @@ export class HermesGlassesClient {
       this.connectionWait = {resolve, reject};
     });
     const result = this.connecting;
+    let parsed = false;
     try {
       const url = new URL(this.url);
+      parsed = true;
       url.searchParams.set('token', this.token);
       const ws = this.socket = new this.WebSocketImpl(url.toString());
       ws.onmessage = event => {
@@ -45,10 +48,11 @@ export class HermesGlassesClient {
         if (ws === this.socket && !this.ready) ws.close();
       }, 10000);
     } catch {
-      this.closed = true;
+      this.closed = !parsed;
       this.connectionWait?.reject(new Error('Invalid WebSocket URL or implementation.'));
       this.connectionWait = this.connecting = null;
       this.emit('error', {type: 'error', message: 'Invalid WebSocket URL or implementation.'});
+      if (parsed) this.scheduleRetry();
     }
     return result;
   }
@@ -59,12 +63,16 @@ export class HermesGlassesClient {
     this.connectionWait?.reject(error);
     this.connectionWait = this.connecting = null;
     for (const id of this.queries.keys()) this.finish(id, error);
+    this.interrupts.clear();
     for (const pending of this.approvals.values()) pending.reject(error);
     this.approvals.clear();
     this.resetWait?.reject(error);
     this.resetWait = null;
     this.emit('disconnected', {code: event.code, reason: event.reason});
-    if (this.reconnect && !this.closed && event.code !== 4401) {
+    if (event.code !== 4401) this.scheduleRetry();
+  }
+  scheduleRetry() {
+    if (this.reconnect && !this.closed) {
       const delay = this.backoff * (0.75 + Math.random() * 0.25);
       this.backoff = Math.min(30000, this.backoff * 2);
       this.retryTimer = setTimeout(() => this.connect().catch(() => {}), delay);
@@ -80,8 +88,13 @@ export class HermesGlassesClient {
       throw new Error('Not connected.');
     this.socket.send(JSON.stringify(frame));
   }
-  ask({text = '', audio, image, speak, id = `q${++this.sequence}`, timeout, signal} = {}) {
-    if (typeof id !== 'string' || !id || this.queries.has(id))
+  nextId() {
+    let id;
+    do { id = `q${++this.sequence}`; } while (this.queries.has(id) || this.interrupts.has(id));
+    return id;
+  }
+  ask({text = '', audio, image, speak, id = this.nextId(), timeout = 180000, signal} = {}) {
+    if (typeof id !== 'string' || !id || this.queries.has(id) || this.interrupts.has(id))
       return Promise.reject(new Error('Query id must be a unique nonempty string.'));
     return new Promise((resolve, reject) => {
       const abort = () => this.finish(id, Object.assign(new Error('Query aborted.'), {code: 'aborted'}));
@@ -89,7 +102,7 @@ export class HermesGlassesClient {
       this.queries.set(id, pending);
       if (signal?.aborted) { abort(); return; }
       signal?.addEventListener('abort', abort, {once: true});
-      if (timeout !== undefined) pending.deadline = setTimeout(() =>
+      if (timeout !== 0) pending.deadline = setTimeout(() =>
         this.finish(id, Object.assign(new Error('Query timed out.'), {code: 'timeout'})), timeout);
       try { this.send({type: 'query', id, text, audio, image, speak}); }
       catch (error) { this.finish(id, error); }
@@ -115,9 +128,11 @@ export class HermesGlassesClient {
     if (this.resetWait) this.resetWait.promise = promise;
     return promise;
   }
-  interrupt(id) {
+  interrupt({ask} = {}) {
+    const id = this.nextId();
+    this.interrupts.add(id);
     this.send({type: 'interrupt', id});
-    const stopped = id ?? [...this.queries].find(([, query]) => !query.result && !query.slash)?.[0];
+    const stopped = ask ?? [...this.queries].find(([, query]) => !query.result && !query.slash)?.[0];
     this.finish(stopped, Object.assign(new Error('Query interrupted.'), {code: 'interrupted'}));
   }
   answerApproval(id, choice) {
@@ -147,12 +162,7 @@ export class HermesGlassesClient {
         this.emit('connected', frame);
         break;
       case 'response':
-        if (!pending || pending.result) break;
-        if (!pending.slash) for (const [earlier, query] of this.queries) {
-          if (earlier === id) break;
-          if (!query.result) this.finish(earlier,
-            Object.assign(new Error('Query superseded by a later ask.'), {code: 'superseded'}));
-        }
+        if (this.interrupts.has(id) || !pending || pending.result) break;
         pending.result = {id, text: frame.text};
         if (pending.transcript !== undefined) pending.result.transcript = pending.transcript;
         if (this.device.capabilities?.audio_out?.length && pending.speak !== false &&
@@ -179,12 +189,14 @@ export class HermesGlassesClient {
         // Uncorrelated errors are operation-wide; never guess which concurrent query failed.
         const error = new Error(frame.message || 'Server error.');
         const correlated = frame.turn ?? frame.id;
-        const hadQueries = this.queries.size > 0;
+        const hasText = [...this.queries.values()].some(query => query.result);
         const entries = correlated === undefined ? [...this.queries] : [[correlated, this.queries.get(correlated)]];
         for (const [key, query] of entries) if (query) {
           this.finish(key, query.result ? undefined : error);
         }
-        if (correlated === undefined && !hadQueries) { this.resetWait?.reject(error); this.resetWait = null; }
+        if (frame.message === 'New session failed.' || !hasText) {
+          this.resetWait?.reject(error); this.resetWait = null;
+        }
         this.emit('error', frame);
         break;
       }
