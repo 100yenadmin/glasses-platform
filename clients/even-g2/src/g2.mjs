@@ -1,6 +1,7 @@
 import {HermesGlassesClient} from '../../js/hermes-glasses.js';
 export const LENS_CHARS = 400;
 const PROMPT_HEIGHT = 112;  // approval page: the request text above the choices
+const PROMPTS = new Set(['clarify', 'approval']);  // Hermes waits on these: they never wait for the turn
 export function label63(value) {
   let out = '';
   for (const char of String(value)) { if (new TextEncoder().encode(out + char).length > 63) break; out += char; }
@@ -9,6 +10,7 @@ export function label63(value) {
 export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSocketImpl = globalThis.WebSocket) {
   let client, turn = false, recording = false, micBusy = false, closed = false, timer, renderTimer, pushTimer, pushing = false;
   let transcript = '', answer = '', content = textBox.content, state = '', approval, selected = 0, page = 'text';
+  let prompt = null, chain = null, forPrompt = false;  // a question Hermes asked mid-turn; one abort for the turn's asks
   let queue = Promise.resolve();
   const pushes = [], approvals = [];
   const serial = fn => (queue = queue.then(fn).catch(() => { fail(); }));
@@ -44,6 +46,8 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
             itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
         page = 'list';
       });
+    } else if (prompt) {
+      show('push', `Hermes asks\n${prompt.text}\nTap to answer`);
     } else if (pushing) {
       // A push is on the lens: its own timer shows the next one.
     } else if (!turn && !recording && pushes.length) {
@@ -57,12 +61,25 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     if (approval?.id !== id) return;
     approval = null; show(turn ? 'thinking' : 'answer', transcript + '\n' + answer); next();
   }
+  function settle(result) { transcript = result.transcript || transcript; answer = result.text; show('answer', `${transcript}\n${answer}`); }
   async function ask(query) {
     if (closed || turn || !client?.ready) { fail(); return; }
-    turn = true; transcript = ''; answer = ''; show('thinking', 'Thinking…');
-    try { const result = await client.ask({...query, speak: false}); transcript = result.transcript || transcript; answer = result.text; show('answer', `${transcript}\n${answer}`); }
-    catch { fail(); }
-    finally { turn = false; pushing = false; if (!closed) { clearTimeout(pushTimer); pushTimer = setTimeout(next, 1500); } }
+    turn = true; prompt = null; transcript = ''; answer = ''; show('thinking', 'Thinking…');
+    const own = chain = new AbortController();
+    try { settle(await client.ask({...query, speak: false, signal: own.signal})); }
+    catch (error) { if (error?.code !== 'aborted') fail(); }
+    finally {
+      own.abort();  // the answer to a mid-turn question is still waiting: this reply ended the turn
+      if (chain === own) chain = null;
+      turn = false; prompt = null; pushing = false; if (!closed) { clearTimeout(pushTimer); pushTimer = setTimeout(next, 1500); }
+    }
+  }
+  async function reply(query) {
+    // The wearer answers a question Hermes asked during the turn. Hermes folds the answer into the running turn,
+    // so the turn's final reply may come back on this ask or on the first one: whichever arrives ends both.
+    const own = chain; prompt = null; show('thinking', 'Thinking…');
+    try { settle(await client.ask({...query, speak: false, signal: own?.signal})); own?.abort(); }
+    catch (error) { if (error?.code !== 'aborted') fail(); }
   }
   async function tap() {
     if (micBusy || closed) return;
@@ -73,7 +90,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       try { await client.answerApproval(id, choice); dismiss(id); } catch { dismiss(id); fail(); }
       return;
     }
-    if (turn || (!recording && !client?.ready)) return;  // a recording always stops, even after a disconnect
+    if ((turn && !prompt && !recording) || (!recording && !client?.ready)) return;  // a recording always stops, even after a disconnect
     micBusy = true;
     try {
       if (recording) {
@@ -81,9 +98,10 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
         if (!await serial(() => bridge.audioControl(false))) { fail(); return; }
         if (!client?.ready) { chunks = []; fail(); return; }
         const data = btoa(chunks.map(chunk => Array.from(chunk, byte => String.fromCharCode(byte)).join('')).join(''));
-        void ask({audio: {mime: 'audio/pcm', rate: 16000, data}}); next();
+        const query = {audio: {mime: 'audio/pcm', rate: 16000, data}};
+        void (forPrompt && turn ? reply(query) : ask(query)); next();
       } else {
-        chunks = []; recording = true;
+        chunks = []; recording = true; forPrompt = turn;
         if (!await serial(() => bridge.audioControl(true))) { recording = false; fail(); return; }
         if (!recording) { serial(() => bridge.audioControl(false)); return; }  // paused while the mic was opening
         show('listening', 'Listening…'); timer = setTimeout(tap, 8000);
@@ -101,8 +119,11 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       client = new HermesGlassesClient({url, token, WebSocketImpl, device: {name: 'Even G2', model: 'G2',
         capabilities: {display: true, display_chars: LENS_CHARS, buttons: true, mic: true}}, app: {name: 'Hermes Glasses', version: '0.1.0'}});
       client.on('transcript', frame => { transcript = frame.text; });
-      client.on('delta', frame => { answer = frame.text; show('answer', `${transcript}\n${answer}`); });
-      client.on('push', frame => { pushes.push(frame); if (!turn && !recording && !approval) next(); });
+      client.on('delta', frame => { answer = frame.text; if (!prompt) show('answer', `${transcript}\n${answer}`); });
+      client.on('push', frame => {
+        if (PROMPTS.has(frame.origin)) { prompt = frame; if (!recording) next(); return; }  // shown at once, even mid-turn
+        pushes.push(frame); if (!turn && !recording && !approval) next();
+      });
       // glasses_show_text: shown like a push, after the turn and between other pushes.
       client.on('display', frame => { pushes.push({origin: 'display', text: frame.text}); if (!turn && !recording && !approval) next(); });
       client.on('approval_request', frame => {
