@@ -387,7 +387,9 @@ class GlassesAdapter(BasePlatformAdapter):
             finally:
                 if sent < len(items):  # closed or cancelled: keep the rest queued, retry on the next frame
                     conn.flushed = False
-                    self.outbox.merge(user, items[sent:])
+                    delivered = self._delivered.get(user, ())  # another device already got these
+                    self.outbox.merge(user, [item for item in items[sent:] if item[3] not in delivered])
+                    self.outbox.forget([item[3] for item in items[sent:] if item[3] in delivered])
 
     def _mark_delivered(self, user, message_id):
         self._delivered.setdefault(user, deque(maxlen=500)).append(message_id)
