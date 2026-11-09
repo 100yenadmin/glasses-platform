@@ -1,7 +1,8 @@
 # Hermes Glasses for Even G2
 
 Tap to talk to your own Hermes: G2 PCM audio goes to Hermes speech-to-text. Tap again to send (8 seconds maximum).
-The transcript and streamed answer appear on the lens. Reminders and Hermes pushes wait until the turn finishes.
+The transcript and streamed answer appear on the lens. Reminders and Hermes pushes wait until the turn finishes;
+a question Hermes asks during the turn shows at once: tap to answer it by voice.
 Approvals show Hermes's choices in a touchpad list: scroll up/down, click to answer. Another device answering closes it.
 Double-tap exits. Foreground only; no speaker, camera or haptics. The phone page mirrors the lens and has settings.
 

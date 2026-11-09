@@ -112,3 +112,144 @@ test('pushes in a burst each get their turn on the lens; display frames show lik
   t.mock.timers.tick(4000); assert.deepEqual(shown(), ['Reminder\nOne', 'Hermes\nTwo']);
   t.mock.timers.tick(4000); assert.deepEqual(shown(), ['Reminder\nOne', 'Hermes\nTwo', 'Hermes\nThree']);
 });
+async function connectedApp(t) {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  t.mock.method(console, 'log', () => {});
+  const views = [], mic = [], pages = [];
+  const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; },
+    textContainerUpgrade: async () => {}, rebuildPageContainer: async page => pages.push(page)}, {height: 288},
+    (state, text) => views.push([state, text]), Socket);
+  t.after(() => app.close());
+  const connected = app.connect('ws://fixture/voice', 'fixture');
+  const socket = Socket.last;
+  socket.frame({type: 'hello_ack'}); await connected;
+  return {app, socket, views, mic, pages};
+}
+async function talk(app, bytes) { await app.tap(); app.pcm(new Uint8Array(bytes)); await app.tap(); await flush(); }
+test('#44: a clarify question mid-turn shows at once and a tap answers it; the folded reply ends the turn', async t => {
+  const {app, socket, views, mic} = await connectedApp(t);
+  await talk(app, [1, 2]);
+  const opener = socket.sent.at(-1);
+  socket.frame({type: 'push', origin: 'cron', text: 'Stretch'});
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  assert.deepEqual(views.at(-1), ['push', 'Hermes asks\nWhich door?\nTap to answer']);  // not held behind the turn
+  await talk(app, [3, 4]);
+  assert.deepEqual(mic, [true, false, true, false]);
+  const answer = socket.sent.at(-1);
+  assert.notEqual(answer.id, opener.id); assert.equal(answer.audio.data, 'AwQ=');
+  // The adapter folds the answer into the running turn: the turn's final reply comes back on the answer's id.
+  socket.frame({type: 'response', turn: answer.id, text: 'Opened the front door.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Opened the front door.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));  // the first ask's release shows no error (the tap below proves the turn ended)
+  t.mock.timers.tick(1500); await flush();
+  assert.deepEqual(views.at(-1), ['push', 'Reminder\nStretch']);  // ordinary pushes still wait for the turn
+  t.mock.timers.tick(4000); await flush();
+  await talk(app, [5]);  // the turn is over: a tap starts a new turn
+  assert.equal(socket.sent.at(-1).audio.data, 'BQ==');
+});
+test('#44: when the reply comes back on the first ask, the answer ask is released too', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  const opener = socket.sent.at(-1);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  const answer = socket.sent.at(-1);
+  assert.notEqual(answer.id, opener.id); assert.equal(answer.audio.data, 'Ag==');
+  socket.frame({type: 'response', turn: opener.id, text: 'Done.'}); await flush();
+  socket.frame({type: 'response', turn: answer.id, text: 'late'}); await flush();
+  assert.ok(!views.some(([, text]) => text.endsWith('late')));  // released: a late reply to it is ignored
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Done.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [3]);
+  assert.equal(socket.sent.at(-1).audio.data, 'Aw==');
+});
+test('#44: without a question, a tap during a turn still does nothing', async t => {
+  const {app, socket, mic} = await connectedApp(t);
+  await talk(app, [1]);
+  const sent = socket.sent.length;
+  await app.tap(); await flush();
+  assert.equal(socket.sent.length, sent); assert.deepEqual(mic, [true, false]);
+});
+test('#44 review: with no local turn, a clarify push is an ordinary push and cannot stick on the lens', async t => {
+  const {socket, views} = await connectedApp(t);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});  // asked by another device's turn, or replayed later
+  socket.frame({type: 'push', origin: 'cron', text: 'Stretch'});
+  assert.deepEqual(views.at(-1), ['push', 'Hermes\nWhich door?']);
+  t.mock.timers.tick(4000); await flush();
+  assert.deepEqual(views.at(-1), ['push', 'Reminder\nStretch']);
+});
+test('#44 review: an approval card takes the lens over a mid-turn question, which comes back after', async t => {
+  const {app, socket, views, pages} = await connectedApp(t);
+  await talk(app, [1]);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  socket.frame({type: 'approval_request', id: 'a', text: 'Run it?', choices: ['once', 'deny']}); await flush();
+  assert.ok(pages.at(-1).listObject);
+  socket.frame({type: 'approval_closed', id: 'a'}); await flush();
+  assert.deepEqual(views.at(-1), ['push', 'Hermes asks\nWhich door?\nTap to answer']);
+});
+test('#44 review: the first ask timing out while the answer is on its way does not drop the reply', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  t.mock.timers.tick(100000);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  const answer = socket.sent.at(-1);
+  t.mock.timers.tick(80001); await flush();  // the first ask's 180 s timeout passes
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  socket.frame({type: 'response', turn: answer.id, text: 'Locked the back door.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [3]);
+  assert.equal(socket.sent.at(-1).audio.data, 'Aw==');  // the turn ended
+});
+test('#44 review: two questions in one turn; the deadline follows the latest answer', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  t.mock.timers.tick(100000);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  t.mock.timers.tick(100000);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Lock it now?'});
+  await talk(app, [3]);
+  const second = socket.sent.at(-1);
+  t.mock.timers.tick(80001); await flush();  // t≈280 s: the first ask (180 s) and the first answer (280 s) have timed out
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  socket.frame({type: 'response', turn: second.id, text: 'Locked the back door now.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door now.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [4]);
+  assert.equal(socket.sent.at(-1).audio.data, 'BA==');
+});
+test('#44 release review: an answer that was not heard asks the question again; the turn goes on', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  const opener = socket.sent.at(-1);
+  socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
+  await talk(app, [2]);
+  socket.frame({type: 'error', turn: socket.sent.at(-1).id, message: "I couldn't hear that."}); await flush();
+  assert.deepEqual(views.at(-1), ['push', "I couldn't hear that.\nHermes asks\nWhich door?\nTap to answer"]);
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+  await talk(app, [3]);
+  const answer = socket.sent.at(-1);
+  assert.notEqual(answer.id, opener.id); assert.equal(answer.audio.data, 'Aw==');
+  socket.frame({type: 'response', turn: answer.id, text: 'Locked the back door.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Locked the back door.')));
+  t.mock.timers.tick(1500); await flush();
+  await talk(app, [4]);
+  assert.equal(socket.sent.at(-1).audio.data, 'BA==');  // the turn ended
+});
+test('#44 release review: a spoken answer to a text approval gets its own reply and the turn carries on', async t => {
+  const {app, socket, views} = await connectedApp(t);
+  await talk(app, [1]);
+  const opener = socket.sent.at(-1);
+  socket.frame({type: 'push', origin: 'approval', text: 'Hermes wants to run: rm -rf build. Say yes or no.'});
+  await talk(app, [2]);
+  socket.frame({type: 'response', turn: socket.sent.at(-1).id, text: 'Okay, going ahead.'}); await flush();
+  assert.deepEqual(views.at(-1), ['thinking', 'Okay, going ahead.']);
+  socket.frame({type: 'response', turn: opener.id, text: 'Deleted the build folder.'}); await flush();
+  assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Deleted the build folder.')));
+  assert.ok(!views.some(([kind]) => kind === 'error'));
+});

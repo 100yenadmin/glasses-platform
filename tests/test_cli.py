@@ -99,6 +99,17 @@ def test_qr_code_is_printed_when_available(home, capsys):
     assert '█' in capsys.readouterr().out
 
 
+def test_pair_says_why_when_no_qr_code_can_be_drawn(home, capsys, monkeypatch):
+    """#47: 0.5.0 hid a missing qrcode package; pair now says so instead of silently printing only the URL."""
+    monkeypatch.setattr(cli, '_qr', lambda url: None)
+    run('pair', 'alice', 'rayban')
+    out = capsys.readouterr().out
+    assert 'No QR code: the qrcode package is missing' in out and 'ws://' in out
+    assert 'hermes glasses pair alice rayban --replace' in out  # the device is already saved: a retry needs --replace
+    run('pair', 'alice', 'watch', '--no-qr')
+    assert 'No QR code' not in capsys.readouterr().out
+
+
 def test_register_adds_the_cli_command_when_hermes_supports_it():
     seen = {}
     ctx = SimpleNamespace(register_platform=lambda **kw: None, register_tool=lambda **kw: None,
