@@ -23,9 +23,6 @@ async def test_quick_against_existing_adapter(server):
     adapter.handle_message = AsyncMock(side_effect=reply)
     report = await kit.check_server(str(client.make_url('/voice')).replace('http:', 'ws:'), 'tok-alice-1')
     failures = [item for item in report.checks if item['status'] == 'FAIL']
-    if len(failures) == 1 and failures[0]['check'] == 'hello_ack server.features list':
-        # Keep this gate visibly incomplete until the server lane supplies required metadata.
-        pytest.xfail('Base adapter hello_ack lacks mandatory server.features; all other quick checks passed.')
     assert report.ok, report.as_dict()
 
 
