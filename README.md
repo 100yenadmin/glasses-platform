@@ -64,7 +64,8 @@ Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connect
 Requirements:
 - Hermes Agent 0.22.2 or later. The plugin needs `aiohttp` and `qrcode`, declared in `pyproject.toml`. Run the
   install in a terminal and answer `y` when Hermes asks to prepare them; scripts add `--yes-deps`. Without either,
-  the plugin installs but stays disabled.
+  the plugin installs but stays disabled. `hermes plugins update glasses-platform` prepares newly declared
+  dependencies too (checked from 0.5.0 to 0.5.1).
 - In-process plugin loading, which is the default. The opt-in `plugins.isolation: host` mode cannot load platform plugins.
 
 ```bash
