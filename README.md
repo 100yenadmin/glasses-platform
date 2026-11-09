@@ -1,11 +1,13 @@
-# glasses-platform
+# Hermes Glasses
 
-![Glasses Platform: your own Hermes agent, on your glasses](docs/media/banner.png)
+![Hermes Glasses: your own Hermes agent, on your glasses](docs/media/banner.png)
+
+Plugin id and repository: `glasses-platform`.
 
 **Talk to your own Hermes agent from smart glasses.** Ask by voice, show it what you see, and hear or read the
 answer. Reminders and long tasks can reach your glasses later.
 
-> **Status: v0.3.1 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
+> **Status: v0.3.2 preview.** The Hermes side is proven against the bundled simulator and a real Hermes
 > gateway with real models ([evidence](docs/evidence/M0-live-proof.md)). CI tests it on Hermes v0.22.2, v0.23.0 and
 > `main`. No real glasses or phone app has been tested yet. Read the [design plan](docs/PLAN.md), the
 > [device protocol](docs/PROTOCOL.md) and the [roadmap](ROADMAP.md).
