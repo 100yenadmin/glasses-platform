@@ -65,8 +65,14 @@ async def check_server(url, token, http=None, full=False, timeout=10):
     Full mode schedules a real reminder on the target agent.
     """
     report = Report()
+    planned = ['welcome protocol_max >= 1', 'hello_ack protocol == 1',
+               'hello_ack identity and version', 'hello_ack server.features list',
+               'malformed and unknown frames keep socket open; ping/pong',
+               'query yields exactly one matching response', 'new_session yields session_reset']
+    if full:
+        planned.append('reminder push within 150 seconds')
     stage = 'bad token closes 4401'
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
         try:
             bad = token_url(url, 'invalid-' + uuid4().hex)
             async with session.ws_connect(bad) as ws:
@@ -76,6 +82,7 @@ async def check_server(url, token, http=None, full=False, timeout=10):
                 report.add(stage, ws.close_code == 4401)
         except (aiohttp.ClientError, TimeoutError, ConnectionError):
             report.add(stage, False, 'Did not receive WebSocket close 4401.')
+        stage = 'connect'
         try:
             async with session.ws_connect(token_url(url, token)) as ws:
                 stage = 'welcome protocol_max >= 1'
@@ -84,8 +91,9 @@ async def check_server(url, token, http=None, full=False, timeout=10):
                 report.add(stage, type(maximum) is int and maximum >= 1)
                 await ws.send_json({'type': 'hello', 'protocol': 1,
                                     'device': {'name': 'conformance', 'capabilities': {}}})
-                stage = 'hello_ack identity and server metadata'
+                stage = 'hello_ack protocol == 1'
                 hello = await receive(ws, 'hello_ack', timeout)
+                report.add(stage, type(hello.get('protocol')) is int and hello['protocol'] == 1)
                 server = hello.get('server', {})
                 report.add('hello_ack identity and version',
                            all(isinstance(hello.get(k), str) and hello[k] for k in ('user', 'device'))
@@ -105,7 +113,8 @@ async def check_server(url, token, http=None, full=False, timeout=10):
                 turn = 'check-' + uuid4().hex
                 await ws.send_json({'type': 'query', 'id': turn, 'text': 'Say hello.', 'speak': False})
                 reply = await receive(ws, 'response', timeout)
-                matches = reply.get('turn') == turn and isinstance(reply.get('text'), str)
+                matches = (reply.get('turn') == turn and isinstance(reply.get('text'), str)
+                           and reply.get('final') is True)
                 await ws.send_json({'type': 'ping'})
                 async with asyncio.timeout(timeout):
                     while True:
@@ -123,10 +132,18 @@ async def check_server(url, token, http=None, full=False, timeout=10):
                     stage = 'reminder push within 150 seconds'
                     await ws.send_json({'type': 'query', 'id': 'reminder-' + uuid4().hex,
                                         'text': 'Remind me in one minute to stretch.'})
-                    push = await receive(ws, 'push', 150)
+                    async with asyncio.timeout(150):
+                        while True:
+                            push = await receive(ws, 'push', 150)
+                            if push.get('origin') == 'cron':
+                                break
                     report.add(stage, isinstance(push.get('id'), str) and isinstance(push.get('text'), str))
         except (aiohttp.ClientError, TimeoutError, ConnectionError, ValueError, TypeError):
             report.add(stage, False, 'Expected frame missing, malformed, or connection failed.')
+        completed = {item['check'] for item in report.checks}
+        for name in planned:
+            if name not in completed:
+                report.skip(name, 'Not reached after ' + stage + ' failed.')
         if http:
             base = http.rstrip('/')
             headers = {'Authorization': 'Bearer ' + token}
@@ -166,7 +183,9 @@ def fake_app(token, *, on_report=None, scenario_timeout=20):
     async def handler(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        if request.query.get('token') != token:
+        auth = request.headers.get('Authorization', '')
+        supplied = auth[7:] if auth.lower().startswith('bearer ') else request.query.get('token')
+        if supplied != token:
             await ws.close(code=4401, message=b'unauthorized')
             return ws
         report = Report()

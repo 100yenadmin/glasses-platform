@@ -13,6 +13,7 @@ def main():
     check.add_argument('--token', required=True)
     check.add_argument('--http')
     check.add_argument('--full', action='store_true')
+    check.add_argument('--timeout', type=float, default=10)
     check.add_argument('--json', action='store_true')
     serve = commands.add_parser('serve')
     serve.add_argument('--port', type=int, default=8766)
@@ -20,7 +21,7 @@ def main():
     serve.add_argument('--json', action='store_true')
     args = parser.parse_args()
     if args.command == 'check-server':
-        report = asyncio.run(check_server(args.url, args.token, args.http, args.full))
+        report = asyncio.run(check_server(args.url, args.token, args.http, args.full, timeout=args.timeout))
         report.print(args.json)
         raise SystemExit(0 if report.ok else 1)
 
