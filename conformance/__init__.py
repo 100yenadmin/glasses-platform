@@ -72,10 +72,12 @@ async def check_server(url, token, http=None, full=False, timeout=10):
     if full:
         planned.append('reminder push within 150 seconds')
     stage = 'bad token closes 4401'
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None)) as session:
         try:
             bad = token_url(url, 'invalid-' + uuid4().hex)
-            async with session.ws_connect(bad) as ws:
+            async with asyncio.timeout(timeout):
+                ws = await session.ws_connect(bad)
+            async with ws:
                 async with asyncio.timeout(timeout):
                     while not ws.closed:
                         await ws.receive()
@@ -84,7 +86,9 @@ async def check_server(url, token, http=None, full=False, timeout=10):
             report.add(stage, False, 'Did not receive WebSocket close 4401.')
         stage = 'connect'
         try:
-            async with session.ws_connect(token_url(url, token)) as ws:
+            async with asyncio.timeout(timeout):
+                ws = await session.ws_connect(token_url(url, token))
+            async with ws:
                 stage = 'welcome protocol_max >= 1'
                 welcome = await receive(ws, 'welcome', timeout)
                 maximum = welcome.get('protocol_max')

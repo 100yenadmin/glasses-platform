@@ -142,15 +142,25 @@ async def test_connect_failure_has_own_stage_and_skips_later_checks():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('protocol', 'final', 'cron', 'failed_check'), [
-    (None, True, True, 'hello_ack protocol == 1'),
-    (2, True, True, 'hello_ack protocol == 1'),
-    (1, None, True, 'query yields exactly one matching response'),
-    (1, False, True, 'query yields exactly one matching response'),
-    (1, True, False, 'reminder push within 150 seconds'),
-    (1, True, True, None),
+@pytest.mark.parametrize(('protocol', 'final', 'cron', 'failed_check', 'push_delay'), [
+    (None, True, True, 'hello_ack protocol == 1', 0),
+    (2, True, True, 'hello_ack protocol == 1', 0),
+    (1, None, True, 'query yields exactly one matching response', 0),
+    (1, False, True, 'query yields exactly one matching response', 0),
+    (1, True, False, 'reminder push within 150 seconds', 0),
+    (1, True, True, None, 0),
+    (1, True, True, None, 0.3),
 ])
-async def test_checker_protocol_final_and_cron_origin(protocol, final, cron, failed_check):
+async def test_checker_protocol_final_and_cron_origin(protocol, final, cron, failed_check, push_delay, monkeypatch):
+    session_timeouts = []
+    session_factory = aiohttp.ClientSession
+
+    def session(*args, **kwargs):
+        session_timeouts.append(kwargs['timeout'].total)
+        return session_factory(*args, **kwargs)
+
+    monkeypatch.setattr(kit.aiohttp, 'ClientSession', session)
+
     async def peer(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -178,6 +188,7 @@ async def test_checker_protocol_final_and_cron_origin(protocol, final, cron, fai
                 else:
                     await ws.send_json({'type': 'push', 'id': 'message', 'origin': 'message', 'text': 'unrelated'})
                     if cron:
+                        await asyncio.sleep(push_delay)  # Longer than the normal 0.2 s step timeout.
                         await ws.send_json({'type': 'push', 'id': 'cron', 'origin': 'cron', 'text': 'stretch'})
                     await ws.close()
         return ws
@@ -190,6 +201,7 @@ async def test_checker_protocol_final_and_cron_origin(protocol, final, cron, fai
         assert any(item['check'] == failed_check and item['status'] == 'FAIL' for item in report.checks), report.as_dict()
     else:
         assert report.ok, report.as_dict()
+    assert session_timeouts == [None], 'WebSocket lifetime must have no session-wide deadline.'
 
 
 @pytest.mark.parametrize('timeout', [None, '0.25'])

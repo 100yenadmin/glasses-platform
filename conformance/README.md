@@ -18,7 +18,8 @@ optional capabilities, so servers without planned voice/actions/approvals/ack su
 can still pass. A missing server.features list fails the required handshake check.
 `--http` adds authentication, malformed-body and empty pending-queue checks; start
 with a quiet device queue. `--timeout` sets the normal request timeout in seconds
-(default 10). Checks not reached after a connection/frame failure are reported SKIP.
+(default 10), applied to each WebSocket connection/receive step and HTTP request,
+not the WebSocket lifetime. Checks not reached after a failure are reported SKIP.
 
 `--full` needs a real agent and creates a real one-minute stretch reminder. It waits
 up to 150 seconds for a push with `origin: 'cron'` after sending the request. Do not use full mode against
