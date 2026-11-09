@@ -1,23 +1,9 @@
-import {
-  waitForEvenAppBridge,
-  TextContainerProperty,
-  CreateStartUpPageContainer,
-  TextContainerUpgrade,
-  OsEventTypeList,
-} from '@evenrealities/even_hub_sdk'
-import { startSttStream } from './asr/stt'
-import { mountUi, setStatus, setTranscript } from './ui'
+import { waitForEvenAppBridge, TextContainerProperty, CreateStartUpPageContainer, OsEventTypeList } from '@evenrealities/even_hub_sdk'
+import { createG2 } from './g2.mjs'
+import { mountUi, setStatus, setTranscript, settingsUi } from './ui'
 
 mountUi()
-
-const API_KEY = import.meta.env.VITE_STT_API_KEY as string
-if (!API_KEY) {
-  setStatus('error', 'VITE_STT_API_KEY not set — copy .env.example to .env.local')
-  console.warn('VITE_STT_API_KEY is not set.')
-}
-
 const bridge = await waitForEvenAppBridge()
-
 const transcript = new TextContainerProperty({
   xPosition: 0,
   yPosition: 0,
@@ -28,7 +14,7 @@ const transcript = new TextContainerProperty({
   paddingLength: 4,
   containerID: 1,
   containerName: 'transcript',
-  content: 'Listening…',
+  content: 'Open settings on the phone',
   isEventCapture: 1,
 })
 
@@ -37,83 +23,26 @@ const created = await bridge.createStartUpPageContainer(
 )
 if (created !== 0) {
   setStatus('error', `createStartUpPageContainer failed: ${created}`)
-  console.error('Failed to create startup page')
+  throw new Error('Failed to create startup page')
 }
 
-let lastRender = ''
-let renderTimer: number | null = null
-let currentContent = 'Listening…'
 
-function scheduleGlassesRender() {
-  if (renderTimer !== null) return
-  renderTimer = window.setTimeout(async () => {
-    renderTimer = null
-    if (currentContent === lastRender) return
-    lastRender = currentContent
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
-        containerID: 1,
-        containerName: 'transcript',
-        content: currentContent,
-      }),
-    )
-  }, 120) // debounce display writes — BLE render queue is slow
+const app = createG2(bridge, transcript, (state: string, text: string) => {
+  setStatus(state, state); setTranscript(text, '')
+})
+const dev = import.meta.env.DEV ? new URLSearchParams(location.search) : new URLSearchParams()
+const url = dev.get('url') ?? await bridge.getLocalStorage('hermes-url')
+const token = dev.get('token') ?? await bridge.getLocalStorage('hermes-token')
+async function connect(url: string, token: string) {
+  try {
+    const parsed = new URL(url)
+    if (!['ws:', 'wss:'].includes(parsed.protocol) || parsed.search || parsed.username || parsed.password || !token) throw Error()
+    if (!await app.store('hermes-url', url) || !await app.store('hermes-token', token)) throw Error()
+    await app.connect(url, token)
+  } catch { app.fail() }
 }
-
-// The default stt.ts is a blank stub that throws. Catch the throw so the UI
-// surfaces the "configure stt.ts" error chip instead of hanging on "Connecting…".
-let stt: ReturnType<typeof startSttStream> | null = null
-try {
-  stt = startSttStream(
-    API_KEY,
-    ({ finalText, interimText }) => {
-      const combined = (finalText + interimText).trim()
-      // 240 chars is a rough fit for the 576x288 text container at default font.
-      currentContent = combined ? combined.slice(-240) : 'Listening…'
-      setTranscript(finalText, interimText)
-      scheduleGlassesRender()
-    },
-    err => {
-      setStatus('error', `STT error: ${(err as Error)?.message ?? err}`)
-      console.error('STT error:', err)
-    },
-  )
-} catch (err) {
-  setStatus('error', (err as Error)?.message ?? 'STT startup failed')
-  console.error('STT startup failed:', err)
-}
-
-let micOn = false
-if (stt) {
-  await bridge.audioControl(true)
-  micOn = true
-  setStatus('listening', 'Microphone live · tap to pause · double-tap to exit')
-}
-
-// Tap toggles capture. `audioControl(false)` stops the host pushing PCM, so no
-// further frames reach `sendPcm`; the STT client itself is left open. If your
-// provider closes an idle stream, tear it down here and reopen it on resume.
-// No-ops until stt.ts is wired up — there is no capture to pause.
-function toggleMic() {
-  if (!stt) return
-  micOn = !micOn
-  bridge.audioControl(micOn)
-  currentContent = micOn ? 'Listening…' : 'Paused'
-  scheduleGlassesRender()
-  setStatus(
-    micOn ? 'listening' : 'paused',
-    micOn ? 'Microphone live · tap to pause · double-tap to exit' : 'Paused · tap to resume · double-tap to exit',
-  )
-}
-
-let cleanedUp = false
-function cleanup() {
-  if (cleanedUp) return
-  cleanedUp = true
-  bridge.audioControl(false)
-  stt?.close()
-  unsubscribe()
-}
+settingsUi(url, token, connect)
+function cleanup() { unsubscribe(); app.close() }
 
 // Reads the event type out of one envelope.
 //
@@ -138,24 +67,17 @@ function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeLis
 //   • Check DOUBLE_CLICK_EVENT before CLICK_EVENT.
 const unsubscribe = bridge.onEvenHubEvent(event => {
   const pcm = event.audioEvent?.audioPcm
-  if (pcm) stt?.sendPcm(pcm)
-
-  const sysType = eventTypeOf(event.sysEvent)
-  const textType = eventTypeOf(event.textEvent)
-
-  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    bridge.shutDownPageContainer(1)
-    return
-  }
-
-  if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
-    toggleMic()
-    return
-  }
-
-  if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
-    cleanup()
-  }
+  if (pcm) app.pcm(pcm)
+  const types = [eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent), eventTypeOf(event.listEvent)]
+  if (types.includes(OsEventTypeList.DOUBLE_CLICK_EVENT)) { app.exit(); return }
+  if (types.some(type => type === OsEventTypeList.SYSTEM_EXIT_EVENT || type === OsEventTypeList.ABNORMAL_EXIT_EVENT || type === OsEventTypeList.FOREGROUND_EXIT_EVENT)) { cleanup(); return }
+  if (event.listEvent?.currentSelectItemIndex !== undefined) app.select(event.listEvent.currentSelectItemIndex)
+  if (types.includes(OsEventTypeList.CLICK_EVENT)) void app.tap()
 })
-
 window.addEventListener('beforeunload', cleanup)
+if (url && token) {
+  await connect(url, token)
+  const say = dev.get('say')
+  if (say) void app.ask({text: say})
+}
+else setStatus('connecting', 'Open settings on the phone')

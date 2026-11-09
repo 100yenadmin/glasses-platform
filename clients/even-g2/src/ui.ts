@@ -1,4 +1,4 @@
-type Status = 'connecting' | 'listening' | 'paused' | 'error'
+type Status = string
 
 let statusEl: HTMLDivElement
 let finalEl: HTMLSpanElement
@@ -9,13 +9,13 @@ export function mountUi() {
   app.innerHTML = `
     <main class="panel">
       <header>
-        <h1>ASR Demo</h1>
+        <h1>Hermes Glasses</h1>
         <div id="status" class="status status-connecting">Connecting…</div>
       </header>
       <section class="transcript" aria-live="polite">
         <span id="final"></span><span id="interim" class="interim"></span>
       </section>
-      <footer>Tap the glasses temple to pause · double-tap to exit.</footer>
+      <footer>Tap to talk; tap again to send (8 seconds max) · double-tap to exit.</footer>
     </main>
   `
   statusEl = app.querySelector<HTMLDivElement>('#status')!
@@ -66,4 +66,15 @@ function injectStyles() {
   const style = document.createElement('style')
   style.textContent = css
   document.head.appendChild(style)
+}
+
+export function settingsUi(url: string, token: string, save: (url: string, token: string) => Promise<void>) {
+  const form = document.createElement('form')
+  form.innerHTML = `<label>Gateway WebSocket URL <input name="url" type="url" required placeholder="wss://gateway.example/voice"></label>
+    <label>Device token <input name="token" type="password" required autocomplete="off"></label><button>Save and connect</button>`
+  const urlInput = form.elements.namedItem('url') as HTMLInputElement
+  const tokenInput = form.elements.namedItem('token') as HTMLInputElement
+  urlInput.value = url || ''; tokenInput.value = token || ''
+  form.onsubmit = event => { event.preventDefault(); void save(urlInput.value.trim(), tokenInput.value.trim()) }
+  document.querySelector('.panel')!.append(form)
 }

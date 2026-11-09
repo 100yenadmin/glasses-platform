@@ -1,13 +1,24 @@
 {
-  "package_id": "com.example.evenhubasr",
+  "package_id": "com.hermesglasses.g2",
   "edition": "202601",
-  "name": "Even Hub ASR",
+  "name": "Hermes Glasses",
   "version": "0.1.0",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.10",
   "entrypoint": "index.html",
   "permissions": [
-    { "name": "g2-microphone", "desc": "Capture audio from the glasses mic for live transcription." }
+    {
+      "name": "g2-microphone",
+      "desc": "Send voice to your Hermes gateway."
+    },
+    {
+      "name": "network",
+      "whitelist": [
+        "wss://REPLACE-ME.example"
+      ]
+    }
   ],
-  "supported_languages": ["en"]
+  "supported_languages": [
+    "en"
+  ]
 }

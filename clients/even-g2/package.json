@@ -1,5 +1,5 @@
 {
-  "name": "evenhub-asr",
+  "name": "hermes-glasses-g2",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "pack": "npm run build && evenhub pack app.json dist",
+    "pack": "node scripts/check-origin.mjs && npm run build && evenhub pack app.json dist",
     "simulate": "evenhub-simulator http://localhost:5173"
   },
   "dependencies": {
