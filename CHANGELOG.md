@@ -2,6 +2,12 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.4 (2026-11-11): one install line for terminals, scripts and agents
+
+Docs only. The README's install line now ends in `--yes-deps`, so the plugin's two dependencies (`aiohttp`, `qrcode`)
+are installed and the plugin is enabled even when there is no terminal to answer the prompt (an agent or a script
+running the install). Before, such an install finished but left the plugin disabled. No code changes.
+
 ## 0.6.3 (2026-11-10): a fresh G2 approval picture
 
 Docs only. The G2 app's approval screenshot is a new capture from the Even Hub simulator talking to a real 0.6.2
