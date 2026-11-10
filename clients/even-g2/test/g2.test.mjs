@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createG2, label63} from '../src/g2.mjs';
+import {createG2, label63, lensChoices} from '../src/g2.mjs';
 class Socket {
   static last;
   constructor() { Socket.last = this; this.readyState = 1; this.sent = []; }
@@ -14,7 +14,7 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   const logs = [], views = [], mic = [], pages = [], writes = [];
   t.mock.method(console, 'log', line => logs.push(line));
   const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; },
-    textContainerUpgrade: async value => writes.push(value), rebuildPageContainer: async page => pages.push(page)},
+    textContainerUpgrade: async value => writes.push(value), rebuildPageContainer: async page => { pages.push(page); return true; }},
     {containerID: 1, containerName: 'transcript', content: 'settings'}, (state, text) => views.push([state, text]), Socket);
   t.after(() => app.close());
   const connected = app.connect('ws://fixture/voice', 'PRIVATE_FIXTURE_TOKEN');
@@ -39,7 +39,7 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   socket.frame({type: 'response', turn: query.id, text: 'Final'}); await flush();
   t.mock.timers.tick(1500); await flush(); assert.deepEqual(views.at(-1), ['push', 'Reminder\nStretch']);
   const long = '界'.repeat(30);
-  socket.frame({type: 'approval_request', id: 'a', text: 'Hermes wants to run: rm -rf build.', choices: ['once', long]});
+  socket.frame({type: 'approval_request', id: 'a', text: 'Hermes wants to run: rm -rf build.', command: 'rm -rf build', choices: ['once', long]});
   await flush();
   assert.equal(pages.at(-1).textObject[0].content, 'Hermes wants to run: rm -rf build.');  // what is approved stays visible
   assert.equal(pages.at(-1).textObject[0].isEventCapture, 0); assert.equal(pages.at(-1).listObject[0].isEventCapture, 1);
@@ -49,11 +49,11 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   assert.deepEqual(socket.sent.at(-1), {type: 'approval_response', id: 'a', choice: long});
   socket.frame({type: 'approval_result', id: 'a', ok: true}); await choice;
   t.mock.timers.tick(120); await flush(); assert.ok(pages.at(-1).textObject && !pages.at(-1).listObject);
-  socket.frame({type: 'approval_request', id: 'b', choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_request', id: 'b', text: 'Run ls?', command: 'ls', choices: ['once', 'deny']}); await flush();
   socket.frame({type: 'approval_closed', id: 'b'}); t.mock.timers.tick(120); await flush();
   assert.ok(pages.at(-1).textObject && !pages.at(-1).listObject);
   await app.tap();
-  socket.frame({type: 'approval_request', id: 'during-mic', choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_request', id: 'during-mic', text: 'Run ls?', command: 'ls', choices: ['once', 'deny']}); await flush();
   assert.notEqual(views.at(-1)[0], 'approval');
   t.mock.timers.tick(8000); await flush(); assert.equal(mic.at(-1), false);
   assert.equal(socket.sent.at(-1).audio.rate, 16000);
@@ -117,7 +117,7 @@ async function connectedApp(t) {
   t.mock.method(console, 'log', () => {});
   const views = [], mic = [], pages = [];
   const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; },
-    textContainerUpgrade: async () => {}, rebuildPageContainer: async page => pages.push(page)}, {height: 288},
+    textContainerUpgrade: async () => {}, rebuildPageContainer: async page => { pages.push(page); return true; }}, {height: 288},
     (state, text) => views.push([state, text]), Socket);
   t.after(() => app.close());
   const connected = app.connect('ws://fixture/voice', 'fixture');
@@ -183,7 +183,7 @@ test('#44 review: an approval card takes the lens over a mid-turn question, whic
   const {app, socket, views, pages} = await connectedApp(t);
   await talk(app, [1]);
   socket.frame({type: 'push', origin: 'clarify', text: 'Which door?'});
-  socket.frame({type: 'approval_request', id: 'a', text: 'Run it?', choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_request', id: 'a', text: 'Run it?', command: 'it', choices: ['once', 'deny']}); await flush();
   assert.ok(pages.at(-1).listObject);
   socket.frame({type: 'approval_closed', id: 'a'}); await flush();
   assert.deepEqual(views.at(-1), ['push', 'Hermes asks\nWhich door?\nTap to answer']);
@@ -252,4 +252,72 @@ test('#44 release review: a spoken answer to a text approval gets its own reply 
   socket.frame({type: 'response', turn: opener.id, text: 'Deleted the build folder.'}); await flush();
   assert.ok(views.some(([kind, text]) => kind === 'answer' && text.endsWith('Deleted the build folder.')));
   assert.ok(!views.some(([kind]) => kind === 'error'));
+});
+
+test('an approval card whose command the lens cannot show whole offers deny only', async t => {
+  const choices = ['once', 'session', 'always', 'deny'];
+  const command = 'echo ' + 'x'.repeat(150) + '; rm -rf ~/Documents';
+  const text = `Hermes wants to run: ${command}. Say yes to allow it once, or no to block it.`;
+  assert.deepEqual(lensChoices({text, command, choices}), ['deny']);
+  assert.deepEqual(lensChoices({text: 'Hermes wants to run: ls. Say yes.', command: 'ls', choices}), choices);
+  assert.deepEqual(lensChoices({text: 'Hermes wants to run: ls.', choices}), ['deny']);  // no command: deny only
+  const lines = 'echo ok' + '\n'.repeat(6) + 'rm -rf ~/';  // short, but the rm line may sit below the box
+  assert.deepEqual(lensChoices({text: `Hermes wants to run: ${lines}.`, command: lines, choices}), ['deny']);
+  const {app, socket, pages} = await connectedApp(t);
+  socket.frame({type: 'approval_request', id: 'long', text, command, choices}); await flush();
+  assert.deepEqual(pages.at(-1).listObject[0].itemContainer.itemName, ['deny']);
+  app.select(0); app.tap(); await flush();
+  assert.deepEqual(socket.sent.at(-1), {type: 'approval_response', id: 'long', choice: 'deny'});
+});
+
+test('a tap while the next card is still being drawn answers nothing', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  t.mock.method(console, 'log', () => {});
+  const pages = [], gates = [];
+  const app = createG2({audioControl: async () => true, textContainerUpgrade: async () => {},
+    rebuildPageContainer: page => new Promise(resolve => gates.push(() => { pages.push(page); resolve(true); }))},
+    {height: 288}, () => {}, Socket);
+  t.after(() => app.close());
+  const connected = app.connect('ws://fixture/voice', 'fixture');
+  const socket = Socket.last;
+  socket.frame({type: 'hello_ack'}); await connected;
+  const long = 'echo ' + 'x'.repeat(200);
+  socket.frame({type: 'approval_request', id: 'A', text: `Hermes wants to run: ${long}.`, command: long,
+                choices: ['once', 'deny']}); await flush();
+  app.select(0); await app.tap(); await flush();
+  assert.equal(socket.sent.filter(f => f.type === 'approval_response').length, 0);  // A not drawn yet
+  gates.shift()(); await flush();
+  assert.deepEqual(pages.at(-1).listObject[0].itemContainer.itemName, ['deny']);
+  socket.frame({type: 'approval_request', id: 'B', text: 'Hermes wants to run: rm -rf build/.', command: 'rm -rf build/',
+                choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_closed', id: 'A'}); await flush();  // B becomes current; its card is not drawn yet
+  app.select(0); await app.tap(); await flush();
+  assert.equal(socket.sent.filter(f => f.type === 'approval_response').length, 0);  // the lens still shows A
+  while (gates.length) { gates.shift()(); await flush(); }
+  assert.deepEqual(pages.at(-1).listObject[0].itemContainer.itemName, ['once', 'deny']);
+  app.select(1); app.tap(); await flush();
+  assert.deepEqual(socket.sent.at(-1), {type: 'approval_response', id: 'B', choice: 'deny'});
+});
+
+test('a card the bridge failed to draw is never answerable from the touchpad', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  t.mock.method(console, 'log', () => {});
+  const pages = [], results = [true, false];
+  const views = [];
+  const app = createG2({audioControl: async () => true, textContainerUpgrade: async () => {},
+    rebuildPageContainer: async page => { pages.push(page); return results.length ? results.shift() : true; }},
+    {height: 288}, (state, text) => views.push([state, text]), Socket);
+  t.after(() => app.close());
+  const connected = app.connect('ws://fixture/voice', 'fixture');
+  const socket = Socket.last;
+  socket.frame({type: 'hello_ack'}); await connected;
+  const long = 'echo ' + 'x'.repeat(200);
+  socket.frame({type: 'approval_request', id: 'A', text: `Hermes wants to run: ${long}.`, command: long,
+                choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_request', id: 'B', text: 'Hermes wants to run: rm -rf build/.', command: 'rm -rf build/',
+                choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_closed', id: 'A'}); await flush();  // B's rebuild returns false: A stays on the lens
+  assert.equal(views.at(-1)[0], 'error');
+  app.select(0); await app.tap(); await flush();  // the touchpad works again (it starts listening) but answers nothing
+  assert.equal(socket.sent.filter(f => f.type === 'approval_response').length, 0);
 });
