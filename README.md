@@ -6,12 +6,14 @@ Your own Hermes agent on smart glasses and voice devices: it sees what you see, 
 
 **[Watch the demo](https://x.com/ElectricSheepIO/status/2119822401361916227)**
 
+https://github.com/user-attachments/assets/3c9346f3-18dd-4f7f-a5b0-389c5846e977
+
 [![Latest release](https://img.shields.io/github/v/release/100yenadmin/glasses-platform)](https://github.com/100yenadmin/glasses-platform/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Hermes >= 0.22.2](https://img.shields.io/badge/Hermes-%3E%3D%200.22.2-6f42c1)](https://hermes-agent.nousresearch.com)
 [![CI](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml)
 
-> **Status: v0.6.4 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
+> **Status: v0.6.5 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
 > simulators and a real Hermes gateway with real models ([evidence](docs/evidence/M0-live-proof.md)); CI tests it on
 > Hermes v0.22.2, v0.23.0 and `main`. Each device path below was run against a real Hermes gateway with a simulated
 > device; no real glasses, watch, voice box or pendant has been tested yet.
