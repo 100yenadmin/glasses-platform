@@ -105,7 +105,10 @@ can hide controls the server cannot use. See [Capabilities](#capabilities) for w
   `response`) and never to another user. Answer a prompt with an ordinary `query`. For a command approval a `query`
   whose whole text is a yes ("yes", "go ahead", "allow it", ...) allows the command once and a no ("no", "stop",
   "cancel", ...) blocks it; the device gets a short `response` ("Okay, going ahead.") to that query. Typed `/approve`
-  and `/deny` also work.
+  and `/deny` also work. The prompt text carries the whole command when it is at most 300 characters. A longer
+  command is clipped in the text, and then a device can only block it: a yes resolves nothing and is not passed to
+  Hermes, and the user allows it with a typed `/approve` after reading the full command. A client that cannot show
+  or speak a prompt's whole text should not offer to approve it.
 - v0 has no `push` frame, so a push sent while a v0 device waits for its answer would look like that answer. While
   a v0 device has a `query` or `new_session` in flight, pushes to it wait until its answer (`response`, `error` or
   `session_reset`) has gone out, then follow in order. They wait 120 s at most (`GLASSES_PUSH_HOLD_SECONDS`).
@@ -180,6 +183,8 @@ S→C {"type":"approval_result","id":"a1b2","ok":true,"choice":"once","message":
 - `id` is Hermes's own request id, so a button can only ever answer that request.
 - `choices` are the ones Hermes offers for this command (a smart-deny offers only `once` and `deny`). A choice that
   is not in the list, an unknown or expired `id`, or another user's `id` gets `ok:false` and changes nothing.
+- When `text` could not carry the whole command (over 300 characters), `choices` is only `["deny"]`, even though
+  `command` holds the whole command: approving it takes a typed `/approve`.
 - When an approval is answered anywhere (a button, a spoken yes or no, a typed `/approve`), the user's other v1
   devices that got the `approval_request` receive `approval_closed`.
 

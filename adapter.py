@@ -48,6 +48,40 @@ def spoken_choice(text):
     return 'once' if phrase in _YES else 'deny' if phrase in _NO else None
 
 
+# The longest command an approval prompt carries whole. A longer one is shown clipped, so it can only be blocked
+# from a device: approving it takes a typed /approve after reading the full command elsewhere.
+WHOLE_COMMAND_LIMIT = 300
+
+
+def approval_prompt_text(command, description, choices):
+    """(text, choices a device may answer with, whole) for an approval prompt. A command up to WHOLE_COMMAND_LIMIT
+    characters is said verbatim; a longer one is clipped and offers deny only, so nobody approves a command they
+    only partly saw or heard."""
+    command = str(command or '').strip()
+    reason = ' '.join(str(description or '').split()).rstrip('.')
+    reason = f' {reason[:1].upper()}{reason[1:]}.' if reason else ''
+    if len(command) <= WHOLE_COMMAND_LIMIT:
+        allow = 'Say yes to allow it once, or no to block it.' if 'once' in choices else 'Say no to block it.'
+        return f'Hermes wants to run: {command}.{reason} {allow} (Typed: /approve or /deny.)', list(choices), True
+    offered = [choice for choice in choices if choice == 'deny']
+    return (f'Hermes wants to run a long command that starts: {command[:WHOLE_COMMAND_LIMIT]}...{reason} Say no to '
+            'block it. Use /approve to allow it after reading the full command.'), offered, False
+
+
+def resolve_approval(approval, choice):
+    """Resolve one approval with a device's answer; the number of requests resolved (0 or 1). A clipped command
+    resolves nothing but a deny. Hermes 0.23+ resolves through its card resolver, which only ever touches this
+    request and applies Hermes' own Deny-only rule for commands a prompt could not show whole."""
+    if choice != 'deny' and not approval.whole:
+        return 0
+    try:
+        from tools.approval import resolve_gateway_approval_card
+    except ImportError:  # Hermes 0.22: no card resolver; the request id still pins the one request
+        from tools.approval import resolve_gateway_approval
+        return resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id)
+    return resolve_gateway_approval_card(approval.session_key, choice, approval.request_id)
+
+
 def hermes_approval_words():
     """Hermes' own bare-word approval replies, word -> 'once', 'deny', or None (session/always). While an approval
     blocks, Hermes takes these exact words (stripped, lower-cased) as /approve or /deny for its OLDEST request."""
@@ -73,6 +107,7 @@ class Approval:
     choices: list
     at: float
     shown: bool = False  # its question has gone out to the devices (or the outbox)
+    whole: bool = True  # its prompt carried the whole command; when False it can only be blocked here
     connections: set = field(default_factory=set)  # devices that received the button prompt
 
 
@@ -371,7 +406,8 @@ class GlassesAdapter(BasePlatformAdapter):
             hermes_words = hermes_approval_words()
             raw = text.lower()
             choice = hermes_words[raw] if raw in hermes_words else spoken_choice(text)
-            if (raw in hermes_words or choice) and await self._answer_approval(conn, frame.get('id'), choice):
+            if (raw in hermes_words or choice) and await self._answer_approval(conn, frame.get('id'), choice,
+                                                                                 frame.get('wearer') is not False):
                 return
         turn_id = frame.get('id')
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else uuid4().hex
@@ -707,18 +743,19 @@ class GlassesAdapter(BasePlatformAdapter):
             if len(new) != 1:
                 return SendResult(success=False, error='Approval request not identifiable')  # Hermes' text prompt
             request_id = new[0]
-        approval = Approval(prompt.session_key, request_id, list(prompt.choices), time.monotonic())
+        text, choices, whole = approval_prompt_text(prompt.command, prompt.description, list(prompt.choices))
+        if not whole:  # Hermes 0.24+ also keeps the request Deny-only for a card tap (its base may have lifted it)
+            try:
+                from tools.approval import restrict_gateway_approval_card_to_deny
+            except ImportError:
+                pass
+            else:
+                restrict_gateway_approval_card_to_deny(prompt.session_key, request_id)
+        approval = Approval(prompt.session_key, request_id, choices, time.monotonic(), whole=whole)
         self._approvals.setdefault(user, []).append(approval)
-        command = ' '.join(str(prompt.command).split())
-        command = command if len(command) <= 90 else command[:87] + '...'
-        reason = ' '.join(str(prompt.description or '').split()).rstrip('.')
-        reason = reason[:1].upper() + reason[1:]
-        allow = 'Say yes to allow it once, or no to block it.' if 'once' in prompt.choices else 'Say no to block it.'
-        text = f'Hermes wants to run: {command}.' + (f' {reason}.' if reason else '') + f' {allow} (Typed: /approve or /deny.)'
         def build(conn):
             if conn.protocol == 1 and conn.capabilities.get('buttons') is True:
-                return protocol.approval_request(request_id, text, prompt.command, prompt.description,
-                                                 list(prompt.choices))
+                return protocol.approval_request(request_id, text, prompt.command, prompt.description, choices)
             return protocol.push(conn.protocol, text, 'approval', message_id)
         message_id = uuid4().hex
         result = await self._push(user, text, 'approval', message_id, build)
@@ -731,7 +768,6 @@ class GlassesAdapter(BasePlatformAdapter):
                 await other.send_json(protocol.approval_closed(approval.request_id, choice))
 
     async def _button_approval(self, conn, frame):
-        from tools.approval import resolve_gateway_approval
         user, request_id, choice = conn.identity.user, frame.get('id'), frame.get('choice')
         approval = next((a for a in self._approvals.get(user, [])
                          if isinstance(request_id, str) and a.request_id == request_id), None)
@@ -740,9 +776,12 @@ class GlassesAdapter(BasePlatformAdapter):
         if approval:
             if approval not in self._live_approvals(user):
                 message = 'Approval expired.'
+            elif choice == 'once' and not approval.whole:
+                message = ('This command was too long to show whole, so it can only be blocked here. Use /approve '
+                           'to allow it after reading the full command.')
             elif not isinstance(choice, str) or choice not in approval.choices:
                 message = 'Invalid choice.'
-            elif resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
+            elif resolve_approval(approval, choice):
                 self._approvals[user].remove(approval)
                 if not self._approvals[user]:
                     self._approvals.pop(user)
@@ -769,7 +808,7 @@ class GlassesAdapter(BasePlatformAdapter):
             self._approvals.pop(user, None)
         return live
 
-    async def _answer_approval(self, conn, query_id, choice):
+    async def _answer_approval(self, conn, query_id, choice, wearer=True):
         """Answer the one approval this user's devices are waiting on with a spoken yes or no (`choice` None: an
         approval word that asks for more than once, like "always").
 
@@ -777,8 +816,9 @@ class GlassesAdapter(BasePlatformAdapter):
         the words go to (Hermes answers that first). Hermes itself takes a bare "yes" as /approve for its OLDEST
         waiting request, so whenever a request waits and it is not certain which one the words answer (two
         waiting, one this adapter could not identify, one that ended mid-answer, one not yet shown), the words
-        are kept here, nothing is resolved, and the device is told how to answer."""
-        from tools.approval import list_gateway_approvals, resolve_gateway_approval
+        are kept here, nothing is resolved, and the device is told how to answer. So are words not marked as the
+        wearer's own (`wearer` False: Omi speech from anyone nearby)."""
+        from tools.approval import list_gateway_approvals
         from tools import clarify_gateway
         user = conn.identity.user
         source = self.build_source(chat_id=user, chat_name=user, chat_type='dm', user_id=user, user_name=user)
@@ -790,15 +830,22 @@ class GlassesAdapter(BasePlatformAdapter):
             return False
         if clarify_gateway.has_pending(own_session):
             return False  # the agent asked a question: Hermes routes a yes or no to its clarify handler first
+        if not wearer:  # kept, not passed on: Hermes itself would take a bare "yes" as /approve
+            await self._deliver_reply(user, conn, query_id, 'Only your own voice can answer an approval. Use /approve '
+                                      'or /deny.')
+            return True
         known = len(self._approvals.get(user, []))
         live = self._live_approvals(user)
         approval = live[0] if len(live) == 1 else None
         certain = bool(approval and approval.shown and known == 1 and queued == {approval.request_id})
-        if certain and choice is None:
+        if certain and choice != 'deny' and not approval.whole:  # a yes never answers a clipped command
+            said = ('That command was too long to read out whole, so I can only block it by voice. Say no to block '
+                    'it. Use /approve to allow it after reading the full command.')
+        elif certain and choice is None:
             said = 'By voice I can only allow a command once. Say yes or no.'
         elif certain and choice not in approval.choices:
             said = 'This command can only be blocked. Say no to block it.'
-        elif certain and resolve_gateway_approval(approval.session_key, choice, request_id=approval.request_id):
+        elif certain and resolve_approval(approval, choice):
             self._approvals.pop(user, None)
             await self._close_approval(user, approval, choice)  # the speaking device's card closes too
             said = 'Okay, going ahead.' if choice == 'once' else "Okay, I won't run it."

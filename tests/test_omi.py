@@ -432,9 +432,32 @@ async def test_spoken_approval_uses_existing_path(server, monkeypatch, words, ch
     await ask_approval(adapter, resolve)
     prompt = await post(client)
     assert 'Say yes to allow it once' in prompt['message']
-    answer = await post(client, segment('Hey Hermes, ' + words))
+    answer = await post(client, segment('Hey Hermes, ' + words, is_user=True))
     assert 'message' in answer and len(answer['message']) > 5
     assert calls == [('agent:main:glasses:dm:alice', choice, 'r1')]
+    adapter.handle_message.assert_not_called()
+
+
+@pytest.mark.parametrize('marks', [{}, {'is_user': False}])
+async def test_only_the_wearers_marked_speech_answers_an_approval(server, monkeypatch, marks):
+    from glasses_plugin.tests.test_spoken_approval import ask_approval
+    adapter, client = server
+    adapter.handle_message = AsyncMock()
+    queue, calls = [], []
+
+    def resolve(key, value, resolve_all=False, reason=None, request_id=None):
+        calls.append((key, value, request_id))
+        return 1
+    resolve.queue = queue
+    monkeypatch.setattr('tools.approval.resolve_gateway_approval', resolve)
+    monkeypatch.setattr('tools.approval.list_gateway_approvals', lambda key: [{'request_id': i} for i in queue])
+    monkeypatch.setattr('tools.clarify_gateway.has_pending', lambda key: False)
+    await ask_approval(adapter, resolve)
+    await post(client)
+    # someone nearby (or speech with no speaker marks) says yes: nothing resolves and Hermes never hears the bare yes
+    answer = await post(client, segment('Hey Hermes, yes', **marks))
+    assert answer['message'].endswith('Only your own voice can answer an approval. Use /approve or /deny.')
+    assert calls == [] and queue == ['r1']
     adapter.handle_message.assert_not_called()
 
 

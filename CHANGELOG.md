@@ -2,6 +2,18 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.2 (2026-11-10): no approving a command you could not read whole
+
+- **Clipped commands can only be blocked from a device.** An approval prompt used to cut the command to 87
+  characters, and a spoken "yes" or an approve button still allowed it, so a user could approve a command they only
+  partly saw or heard. The prompt now carries the whole command up to 300 characters. A longer one is clipped and
+  offers deny only: a spoken yes or an approve button resolves nothing, and the prompt says to use `/approve` after
+  reading the full command. Short commands shown whole are still approved by voice as before.
+- **Answers go through Hermes's card resolver.** On Hermes 0.23 and later, button and voice answers resolve through
+  `resolve_gateway_approval_card`, so Hermes's own Deny-only rule for clipped commands applies too.
+- **Omi: only your own voice answers an approval.** A yes or no counts only from transcript segments marked
+  `is_user` (the wearer); speech from anyone nearby is not acted on and not passed to Hermes as a bare yes.
+
 ## 0.6.1 (2026-11-10): a clearer README
 
 - **Install, pair and try on the first screen.** The README opens with the install command in its short
