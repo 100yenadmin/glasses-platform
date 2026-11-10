@@ -2,6 +2,11 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.5 (2026-11-11): the demo film on the README
+
+Docs only. The demo film now plays on the README itself, under the demo link, so you can watch it without X. No code
+changes.
+
 ## 0.6.4 (2026-11-11): one install line for terminals, scripts and agents
 
 Docs only. The README's install line now ends in `--yes-deps`, so the plugin's two dependencies (`aiohttp`, `qrcode`)
