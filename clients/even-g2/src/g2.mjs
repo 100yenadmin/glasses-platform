@@ -52,14 +52,20 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       serial(async () => {
         // What is being approved stays on the lens above the choices; only the list takes touchpad events.
         const {content: _text, ...frame} = textBox;  // the bridge rejects text-only fields on a list container
-        await bridge.rebuildPageContainer({containerTotalNum: 2,
+        let drawn = false;
+        page = 'list';  // whatever is on the lens now, the next text view rebuilds the whole page
+        try { drawn = await bridge.rebuildPageContainer({containerTotalNum: 2,
           textObject: [{...textBox, containerID: 2, containerName: 'prompt', yPosition: 0, height: PROMPT_HEIGHT,
             isEventCapture: 0, content: lensPrompt(request.text)}],
           listObject: [{...frame, containerID: 1, containerName: 'choices', yPosition: PROMPT_HEIGHT,
             height: textBox.height - PROMPT_HEIGHT, isEventCapture: 1,
-            itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
-        page = 'list';
-        if (approval === request) onLens = request;
+            itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]}) === true; }
+        catch { drawn = false; }
+        if (approval !== request) return;
+        if (drawn) { onLens = request; return; }
+        // Not drawn (the bridge returned false or threw): this card is never answerable from the touchpad. Answer it
+        // by voice or a typed /approve or /deny; the lens shows the error and the touchpad works again.
+        approval = null; onLens = null; fail(); next();
       });
     } else if (prompt) {
       show('push', `${prompt.note ? prompt.note + '\n' : ''}Hermes asks\n${prompt.text}\nTap to answer`);

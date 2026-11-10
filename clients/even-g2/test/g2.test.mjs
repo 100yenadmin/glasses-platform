@@ -14,7 +14,7 @@ test('G2 PCM, cumulative stream, deferred push, choices and secret-free state lo
   const logs = [], views = [], mic = [], pages = [], writes = [];
   t.mock.method(console, 'log', line => logs.push(line));
   const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; },
-    textContainerUpgrade: async value => writes.push(value), rebuildPageContainer: async page => pages.push(page)},
+    textContainerUpgrade: async value => writes.push(value), rebuildPageContainer: async page => { pages.push(page); return true; }},
     {containerID: 1, containerName: 'transcript', content: 'settings'}, (state, text) => views.push([state, text]), Socket);
   t.after(() => app.close());
   const connected = app.connect('ws://fixture/voice', 'PRIVATE_FIXTURE_TOKEN');
@@ -117,7 +117,7 @@ async function connectedApp(t) {
   t.mock.method(console, 'log', () => {});
   const views = [], mic = [], pages = [];
   const app = createG2({audioControl: async enabled => { mic.push(enabled); return true; },
-    textContainerUpgrade: async () => {}, rebuildPageContainer: async page => pages.push(page)}, {height: 288},
+    textContainerUpgrade: async () => {}, rebuildPageContainer: async page => { pages.push(page); return true; }}, {height: 288},
     (state, text) => views.push([state, text]), Socket);
   t.after(() => app.close());
   const connected = app.connect('ws://fixture/voice', 'fixture');
@@ -275,7 +275,7 @@ test('a tap while the next card is still being drawn answers nothing', async t =
   t.mock.method(console, 'log', () => {});
   const pages = [], gates = [];
   const app = createG2({audioControl: async () => true, textContainerUpgrade: async () => {},
-    rebuildPageContainer: page => new Promise(resolve => gates.push(() => { pages.push(page); resolve(); }))},
+    rebuildPageContainer: page => new Promise(resolve => gates.push(() => { pages.push(page); resolve(true); }))},
     {height: 288}, () => {}, Socket);
   t.after(() => app.close());
   const connected = app.connect('ws://fixture/voice', 'fixture');
@@ -297,4 +297,27 @@ test('a tap while the next card is still being drawn answers nothing', async t =
   assert.deepEqual(pages.at(-1).listObject[0].itemContainer.itemName, ['once', 'deny']);
   app.select(1); app.tap(); await flush();
   assert.deepEqual(socket.sent.at(-1), {type: 'approval_response', id: 'B', choice: 'deny'});
+});
+
+test('a card the bridge failed to draw is never answerable from the touchpad', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  t.mock.method(console, 'log', () => {});
+  const pages = [], results = [true, false];
+  const views = [];
+  const app = createG2({audioControl: async () => true, textContainerUpgrade: async () => {},
+    rebuildPageContainer: async page => { pages.push(page); return results.length ? results.shift() : true; }},
+    {height: 288}, (state, text) => views.push([state, text]), Socket);
+  t.after(() => app.close());
+  const connected = app.connect('ws://fixture/voice', 'fixture');
+  const socket = Socket.last;
+  socket.frame({type: 'hello_ack'}); await connected;
+  const long = 'echo ' + 'x'.repeat(200);
+  socket.frame({type: 'approval_request', id: 'A', text: `Hermes wants to run: ${long}.`, command: long,
+                choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_request', id: 'B', text: 'Hermes wants to run: rm -rf build/.', command: 'rm -rf build/',
+                choices: ['once', 'deny']}); await flush();
+  socket.frame({type: 'approval_closed', id: 'A'}); await flush();  // B's rebuild returns false: A stays on the lens
+  assert.equal(views.at(-1)[0], 'error');
+  app.select(0); await app.tap(); await flush();  // the touchpad works again (it starts listening) but answers nothing
+  assert.equal(socket.sent.filter(f => f.type === 'approval_response').length, 0);
 });
