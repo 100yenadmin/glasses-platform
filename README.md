@@ -11,7 +11,7 @@ Your own Hermes agent on smart glasses and voice devices: it sees what you see, 
 [![Hermes >= 0.22.2](https://img.shields.io/badge/Hermes-%3E%3D%200.22.2-6f42c1)](https://hermes-agent.nousresearch.com)
 [![CI](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml)
 
-> **Status: v0.6.3 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
+> **Status: v0.6.4 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
 > simulators and a real Hermes gateway with real models ([evidence](docs/evidence/M0-live-proof.md)); CI tests it on
 > Hermes v0.22.2, v0.23.0 and `main`. Each device path below was run against a real Hermes gateway with a simulated
 > device; no real glasses, watch, voice box or pendant has been tested yet.
@@ -19,11 +19,12 @@ Your own Hermes agent on smart glasses and voice devices: it sees what you see, 
 ## Install
 
 ```bash
-hermes plugins install 100yenadmin/glasses-platform --enable
+hermes plugins install 100yenadmin/glasses-platform --enable --yes-deps
 ```
 
-In a terminal, answer `y` to install the `aiohttp` and `qrcode` dependencies; without a terminal add `--yes-deps`.
-(Without either, the plugin installs but stays disabled.) No API keys are needed. Needs Hermes Agent 0.22.2 or later
+`--yes-deps` installs the `aiohttp` and `qrcode` dependencies without asking, so the same line works in a terminal,
+in a script or when an agent runs it. (In a terminal you can leave it off and answer `y`. Without a terminal and
+without `--yes-deps`, the plugin installs but stays disabled.) No API keys are needed. Needs Hermes Agent 0.22.2 or later
 with in-process plugin loading, which is the default; the opt-in `plugins.isolation: host` mode cannot load platform
 plugins.
 
@@ -296,8 +297,7 @@ server's advertised capabilities.
 ## Troubleshooting
 
 - **The plugin is installed but disabled.** Its dependencies were skipped.
-  Reinstall in a terminal and answer `y`: `hermes plugins install 100yenadmin/glasses-platform --force --enable`
-  (or add `--yes-deps` without a terminal).
+  Reinstall with its dependencies: `hermes plugins install 100yenadmin/glasses-platform --force --enable --yes-deps`.
 - **`pair` printed no QR code.** The `qrcode` package is missing from the plugin's environment. Reinstall as above,
   then `hermes glasses pair <user> <device> --replace` for a QR code with a new token. The printed URL works meanwhile.
 - **The device cannot connect.** Restart the gateway after pairing (`hermes gateway restart`). Check that the phone
