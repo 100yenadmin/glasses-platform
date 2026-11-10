@@ -13,7 +13,8 @@ Each release has full notes on the [releases page](https://github.com/100yenadmi
   `resolve_gateway_approval_card`, so Hermes's own Deny-only rule for clipped commands applies too.
 - **Speech, G2 and Pebble.** When Hermes's text-to-speech drops part of a command from a spoken prompt (it skips
   paths and web addresses), a spoken yes can only block it; buttons and typed `/approve` still work. The G2 app
-  offers only Deny when the lens cannot show the whole command. Pebble shows approval prompts verbatim. A yes is
+  offers only Deny when the lens cannot show the whole command (or it spans lines), and a tap answers only the card
+  already on the lens. Pebble shows approval prompts verbatim. A yes is
   also checked when Hermes asked for approval as text, so a bare yes never reaches Hermes's own oldest-request rule.
 - **Omi: only your own voice answers an approval.** A yes or no counts only from transcript segments marked
   `is_user` (the wearer); speech from anyone nearby is not acted on and not passed to Hermes as a bare yes.
