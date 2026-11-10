@@ -82,6 +82,16 @@ def resolve_approval(approval, choice):
     return resolve_gateway_approval_card(approval.session_key, choice, approval.request_id)
 
 
+def speech_keeps_command(text, command):
+    """True when Hermes' speech of `text` still says the whole command. Hermes' text-to-speech cleanup drops paths
+    and URLs (`rm -rf ~/` is heard as "rm -rf"), so a spoken prompt can carry less than the written one."""
+    try:
+        from tools.tts_text_normalize import prepare_spoken_text
+        return ' '.join(str(command).split()) in prepare_spoken_text(text, max_chars=None)
+    except Exception:  # no way to tell: count it as not whole
+        return False
+
+
 def hermes_approval_words():
     """Hermes' own bare-word approval replies, word -> 'once', 'deny', or None (session/always). While an approval
     blocks, Hermes takes these exact words (stripped, lower-cased) as /approve or /deny for its OLDEST request."""
@@ -108,6 +118,8 @@ class Approval:
     at: float
     shown: bool = False  # its question has gone out to the devices (or the outbox)
     whole: bool = True  # its prompt carried the whole command; when False it can only be blocked here
+    command: str = ''
+    heard_whole: bool = True  # every device that heard it spoken heard the whole command (speech can drop paths)
     connections: set = field(default_factory=set)  # devices that received the button prompt
 
 
@@ -204,6 +216,7 @@ class GlassesAdapter(BasePlatformAdapter):
         self._resets = {}  # new_session query id -> (device, time), until its session_reset is sent
         self._approvals = {}  # user -> approvals sent to the devices and not yet answered there, oldest first
         self._approval_sessions = {}  # user -> Hermes session keys that have asked this user's devices for approval
+        self._approval_refs = OrderedDict()  # push message id or request id -> its Approval (for its audio)
         self._silent, self._speech = {}, OrderedDict()
         self._speech_slots = asyncio.Semaphore(2)
         self._runner, self._app, self._loop = None, None, None
@@ -402,7 +415,8 @@ class GlassesAdapter(BasePlatformAdapter):
             return
         user = conn.identity.user
         # A yes or no while an approval waits is handled here (a typed /approve or /deny goes to Hermes as is).
-        if self._approval_sessions.get(user) and not text.startswith('/'):
+        # Checked even before this adapter showed any approval: Hermes may be waiting on one it asked as text.
+        if not text.startswith('/'):
             hermes_words = hermes_approval_words()
             raw = text.lower()
             choice = hermes_words[raw] if raw in hermes_words else spoken_choice(text)
@@ -669,6 +683,9 @@ class GlassesAdapter(BasePlatformAdapter):
     def _speak(self, conn, text, ref):
         mimes = audio.output_mimes(conn.capabilities) if conn.protocol == 1 else []
         if mimes and not self._silent.get((conn.identity.user, ref)):
+            approval = self._approval_refs.get(ref)
+            if approval and approval.heard_whole and not speech_keeps_command(text, approval.command):
+                approval.heard_whole = False  # a spoken yes can no longer allow it
             self._spawn(self._send_speech(conn, text, ref, mimes))
 
     async def _send_speech(self, conn, text, ref, mimes):
@@ -751,13 +768,18 @@ class GlassesAdapter(BasePlatformAdapter):
                 pass
             else:
                 restrict_gateway_approval_card_to_deny(prompt.session_key, request_id)
-        approval = Approval(prompt.session_key, request_id, choices, time.monotonic(), whole=whole)
+        approval = Approval(prompt.session_key, request_id, choices, time.monotonic(), whole=whole,
+                            command=str(prompt.command or '').strip())
         self._approvals.setdefault(user, []).append(approval)
+        message_id = uuid4().hex
+        for ref in (message_id, request_id):  # the audio of a push names its message id, of a card the request id
+            self._approval_refs[ref] = approval
+        while len(self._approval_refs) > 200:
+            self._approval_refs.popitem(last=False)
         def build(conn):
             if conn.protocol == 1 and conn.capabilities.get('buttons') is True:
                 return protocol.approval_request(request_id, text, prompt.command, prompt.description, choices)
             return protocol.push(conn.protocol, text, 'approval', message_id)
-        message_id = uuid4().hex
         result = await self._push(user, text, 'approval', message_id, build)
         approval.shown = True
         return result
@@ -841,6 +863,9 @@ class GlassesAdapter(BasePlatformAdapter):
         if certain and choice != 'deny' and not approval.whole:  # a yes never answers a clipped command
             said = ('That command was too long to read out whole, so I can only block it by voice. Say no to block '
                     'it. Use /approve to allow it after reading the full command.')
+        elif certain and choice != 'deny' and not approval.heard_whole:  # nor one whose speech dropped words
+            said = ('I could not say that whole command out loud, so I can only block it by voice. Say no to block '
+                    'it. Use /approve or a button to allow it after reading the full command.')
         elif certain and choice is None:
             said = 'By voice I can only allow a command once. Say yes or no.'
         elif certain and choice not in approval.choices:

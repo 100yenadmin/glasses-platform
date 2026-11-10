@@ -107,8 +107,10 @@ can hide controls the server cannot use. See [Capabilities](#capabilities) for w
   "cancel", ...) blocks it; the device gets a short `response` ("Okay, going ahead.") to that query. Typed `/approve`
   and `/deny` also work. The prompt text carries the whole command when it is at most 300 characters. A longer
   command is clipped in the text, and then a device can only block it: a yes resolves nothing and is not passed to
-  Hermes, and the user allows it with a typed `/approve` after reading the full command. A client that cannot show
-  or speak a prompt's whole text should not offer to approve it.
+  Hermes, and the user allows it with a typed `/approve` after reading the full command. The same holds for a
+  spoken yes when a device that declared `audio_out` was sent the prompt as speech and Hermes's text-to-speech
+  dropped part of the command (paths and web addresses). A client that cannot show or speak a prompt's whole text
+  should not offer to approve it.
 - v0 has no `push` frame, so a push sent while a v0 device waits for its answer would look like that answer. While
   a v0 device has a `query` or `new_session` in flight, pushes to it wait until its answer (`response`, `error` or
   `session_reset`) has gone out, then follow in order. They wait 120 s at most (`GLASSES_PUSH_HOLD_SECONDS`).

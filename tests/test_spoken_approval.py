@@ -222,8 +222,11 @@ async def test_without_a_request_id_the_one_new_request_is_used_or_hermes_text_i
 
 
 @pytest.mark.asyncio
-async def test_another_users_yes_never_answers_it(hermes):
+async def test_another_users_yes_never_answers_it(hermes, monkeypatch):
     adapter, client, calls, resolve = hermes
+    alice = 'agent:main:glasses:dm:alice'  # Hermes' queue is per session: bob's session has nothing waiting
+    monkeypatch.setattr('tools.approval.list_gateway_approvals',
+                        lambda key: [{'request_id': r} for r in resolve.queue] if key == alice else [])
     await ask_approval(adapter, resolve)
     bob = await opened(client, 'tok-bob-1', version=1)
     await say(bob, 'yes')

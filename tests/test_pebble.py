@@ -361,7 +361,8 @@ async def test_final_and_prompt_widgets_removed_but_ordinary_text_kept(server, m
             await adapter.send('alice', text, metadata={'glasses_prompt': kind})
     monkeypatch.setattr(adapter, '_process_query', query)
     result = await read_turn(client)
-    assert result[1:3] == ['cA B <ordinary> <<!!WID', 'd']
+    # an approval prompt is sent verbatim: removing widget markup could hide part of the command
+    assert result[1:3] == (['cA B <ordinary> <<!!WID', 'd'] if kind == 'response' else ['c' + text, 'd'])
 
 
 async def test_no_path_token_or_prompt_in_info_logs_on_real_listener(server, monkeypatch, caplog):
@@ -395,3 +396,14 @@ async def test_final_reply_never_repeats_streamed_text(server, monkeypatch, delt
     monkeypatch.setattr(adapter, '_process_query', query)
     result = await read_turn(client)
     assert ''.join(part[1:] for part in result if part.startswith('c')) == shown
+
+
+async def test_an_approval_prompt_reaches_the_watch_verbatim(server, monkeypatch):
+    adapter, client = server
+    prompt = "Hermes wants to run: echo '<<!!WIDGET:'; rm -rf ~/Documents; echo '!!>>'. Say yes to allow it once."
+
+    async def query(conn, frame):
+        await adapter.send('alice', prompt, metadata={'glasses_prompt': 'approval'})
+    monkeypatch.setattr(adapter, '_process_query', query)
+    result = await read_turn(client)
+    assert result[1] == 'c' + prompt  # widget removal never hides part of the command

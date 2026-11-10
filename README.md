@@ -261,7 +261,10 @@ The agent gets three tools (toolset `glasses`) while it talks to a glasses user:
   user's own devices answers it; anything else goes to the agent as usual. Devices with buttons get the same approval
   as a card and can pick any choice Hermes offers for that request. A longer command is shown clipped, so a device
   can only block it: a spoken yes or an approve button does nothing, and you allow it with a typed `/approve` after
-  reading the full command. Typed `/approve` and `/deny` still work. The plugin never answers an approval by itself.
+  reading the full command. The same goes for a spoken yes when a device heard the prompt through Hermes's
+  text-to-speech and the speech dropped part of the command (it skips paths and web addresses). The G2 app offers
+  only Deny when its lens cannot show the whole command. Typed `/approve` and `/deny` still work. The plugin never
+  answers an approval by itself.
 - **Speech.** Recordings from devices are transcribed, and spoken answers made, with Hermes's own speech settings
   (`stt` and `tts` in Hermes's config). With a cloud speech provider, the recording or the reply text goes to that
   provider, as it does for voice messages on any other channel. Recordings are cached like other Hermes audio.

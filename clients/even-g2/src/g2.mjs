@@ -1,6 +1,18 @@
 import {HermesGlassesClient} from '../../js/hermes-glasses.js';
 export const LENS_CHARS = 400;
 const PROMPT_HEIGHT = 112;  // approval page: the request text above the choices
+export const PROMPT_CHARS = 160;  // what fits in that text box
+export function lensPrompt(text) {
+  const prompt = String(text || 'Hermes approval');
+  return prompt.length > PROMPT_CHARS ? prompt.slice(0, PROMPT_CHARS - 1) + '…' : prompt;
+}
+// A command the lens cannot show whole can only be denied from the glasses (a typed /approve still allows it).
+export function lensChoices(frame) {
+  const command = typeof frame.command === 'string' ? frame.command : '';
+  const text = String(frame.text || '');
+  const visible = text.length > PROMPT_CHARS ? text.slice(0, PROMPT_CHARS - 1) : text;
+  return command && visible.includes(command) ? frame.choices : frame.choices.filter(choice => choice === 'deny');
+}
 const PROMPTS = new Set(['clarify', 'approval']);  // Hermes waits on these: they never wait for the turn
 export function label63(value) {
   let out = '';
@@ -37,10 +49,9 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       serial(async () => {
         // What is being approved stays on the lens above the choices; only the list takes touchpad events.
         const {content: _text, ...frame} = textBox;  // the bridge rejects text-only fields on a list container
-        const prompt = String(request.text || 'Hermes approval');
         await bridge.rebuildPageContainer({containerTotalNum: 2,
           textObject: [{...textBox, containerID: 2, containerName: 'prompt', yPosition: 0, height: PROMPT_HEIGHT,
-            isEventCapture: 0, content: prompt.length > 160 ? prompt.slice(0, 159) + '…' : prompt}],
+            isEventCapture: 0, content: lensPrompt(request.text)}],
           listObject: [{...frame, containerID: 1, containerName: 'choices', yPosition: PROMPT_HEIGHT,
             height: textBox.height - PROMPT_HEIGHT, isEventCapture: 1,
             itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
@@ -150,7 +161,9 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       client.on('display', frame => { pushes.push({origin: 'display', text: frame.text}); if (!turn && !recording && !approval) next(); });
       client.on('approval_request', frame => {
         if (!Array.isArray(frame.choices) || !frame.choices.length || frame.choices.length > 20) { fail(); return; }
-        approvals.push({...frame, choices: frame.choices}); next();
+        const choices = lensChoices(frame);
+        if (!choices.length) { fail(); return; }
+        approvals.push({...frame, choices}); next();
       });
       client.on('approval_closed', frame => dismiss(frame.id));
       // An error that names its query is handled by that query's ask; only operation-wide errors show here.
