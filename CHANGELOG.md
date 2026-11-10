@@ -2,6 +2,12 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.3 (2026-11-10): a fresh G2 approval picture
+
+Docs only. The G2 app's approval screenshot is a new capture from the Even Hub simulator talking to a real 0.6.2
+gateway: the whole command fits on the lens, so every choice is offered. The old picture showed a clipped command
+that still offered "once", which 0.6.2 no longer allows. No code changes.
+
 ## 0.6.2 (2026-11-10): no approving a command you could not read whole
 
 - **Clipped commands can only be blocked from a device.** An approval prompt used to cut the command to 87
