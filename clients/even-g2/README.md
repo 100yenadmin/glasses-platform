@@ -12,6 +12,9 @@ Lens captures from the official Even Hub simulator, talking to a real Hermes gat
 |---|---|---|
 | ![Answer on the lens](docs/answer.png) | ![Approval choices](docs/approval-list.png) | ![Reminder push](docs/reminder.png) |
 
+An approval card offers its choices only when the whole command is on the lens. When the command does not fit
+(or spans lines), the card offers only Deny; allow it with a typed `/approve` after reading the full command.
+
 ## Develop and side-load
 
 From this directory: `npm install`, then `npm run dev` (port 5173, fails if occupied).
