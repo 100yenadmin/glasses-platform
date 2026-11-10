@@ -27,6 +27,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   let prompt = null, chain = null, forPrompt = false, answering = null;  // a question Hermes asked mid-turn; one abort for the turn's asks
   let queue = Promise.resolve();
   const pushes = [], approvals = [];
+  let onLens = null;  // the approval whose card is drawn: taps answer only that one, never one still being drawn
   const serial = fn => (queue = queue.then(fn).catch(() => { fail(); }));
   function show(kind, text) {
     if (closed) return;
@@ -45,7 +46,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   function next() {
     if (closed || approval || recording) return;
     if (approvals.length) {
-      approval = approvals.shift(); selected = 0;
+      approval = approvals.shift(); selected = 0; onLens = null;
       show('approval', approval.text || 'Hermes approval');
       const request = approval;
       serial(async () => {
@@ -58,6 +59,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
             height: textBox.height - PROMPT_HEIGHT, isEventCapture: 1,
             itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
         page = 'list';
+        if (approval === request) onLens = request;
       });
     } else if (prompt) {
       show('push', `${prompt.note ? prompt.note + '\n' : ''}Hermes asks\n${prompt.text}\nTap to answer`);
@@ -72,7 +74,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     const index = approvals.findIndex(item => item.id === id);
     if (index >= 0) approvals.splice(index, 1);
     if (approval?.id !== id) return;
-    approval = null; show(turn ? 'thinking' : 'answer', transcript + '\n' + answer); next();
+    approval = null; onLens = null; show(turn ? 'thinking' : 'answer', transcript + '\n' + answer); next();
   }
   function settle(result) { transcript = result.transcript || transcript; answer = result.text; show('answer', `${transcript}\n${answer}`); }
   async function ask(query) {
@@ -117,6 +119,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   async function tap() {
     if (micBusy || closed) return;
     if (approval) {
+      if (onLens !== approval) return;  // the lens still shows the previous card (or nothing yet)
       const id = approval.id, choice = approval.choices[selected];
       if (approval.sending) return;
       approval.sending = true;
@@ -146,7 +149,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     fail, ask, tap,
     async store(key, value) { let saved = false; await serial(async () => { saved = await bridge.setLocalStorage(key, value); }); return saved; },
     pcm(chunk) { if (recording) chunks.push(new Uint8Array(chunk)); },
-    select(index) { if (approval && Number.isInteger(index) && index >= 0 && index < approval.choices.length) selected = index; },
+    select(index) { if (approval && onLens === approval && Number.isInteger(index) && index >= 0 && index < approval.choices.length) selected = index; },
     async connect(url, token) {
       client?.disconnect();
       client = new HermesGlassesClient({url, token, WebSocketImpl, device: {name: 'Even G2', model: 'G2',
