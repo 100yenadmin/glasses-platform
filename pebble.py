@@ -28,6 +28,16 @@ def _text(text, final=False):
     return text
 
 
+def _is_approval(frame):
+    return frame.get('type') == 'approval_request' or frame.get('type') == 'push' and frame.get('origin') == 'approval'
+
+
+def _final_text(frame, text):
+    """Text for a whole frame. An approval prompt is sent verbatim: removing widget markup from it could hide part of
+    the command being approved."""
+    return text if _is_approval(frame) else _text(text, final=True)
+
+
 def _extension(previous, visible, final=False):
     """What the watch still needs: Bobby can only append, and Hermes trims whitespace from its final text."""
     if visible.startswith(previous):
@@ -123,13 +133,13 @@ class BobbyApi:
                 await chunk(terminal.get('text', ''), final=True)
             else:
                 await ws.send_str(('w' if terminal.get('type') == 'error' else 'c') +
-                                  _text(terminal.get('text', terminal.get('message', '')), final=True))
+                                  _final_text(terminal, terminal.get('text', terminal.get('message', ''))))
                 shown.append(terminal)
             for frame in frames:
                 if _is_push(frame) and frame not in shown:
                     origin = frame.get('origin', 'approval')
                     tag = 'Reminder' if origin == 'cron' else origin.capitalize()
-                    await ws.send_str('c\n\n' + _text(tag + ': ' + frame.get('text', ''), final=True))
+                    await ws.send_str('c\n\n' + _final_text(frame, tag + ': ' + frame.get('text', '')))
                     shown.append(frame)
             await ws.send_str('d')
             done = True

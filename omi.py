@@ -42,7 +42,7 @@ class OmiApi:
         if state['until'] < now:
             state['until'] = 0
         user_only = any(segment.get('is_user') is True for segment in segments)
-        questions, words = [], []
+        questions, words, wearer = [], [], True  # wearer: every segment of the question is marked as the wearer's
         for segment in segments:
             text = segment['text']
             key = (segment.get('start'), text)
@@ -56,14 +56,15 @@ class OmiApi:
             wake = WAKE.match(text)
             if wake:
                 if words:
-                    questions.append(' '.join(words))
-                    words = []
+                    questions.append((' '.join(words), wearer))
+                    words, wearer = [], True
                 state['until'] = now + FOLLOWUP_SECONDS
                 text = text[wake.end():]
             if state['until'] and text.strip():
                 words.append(text.strip())
+                wearer = wearer and segment.get('is_user') is True
         if words:
-            questions.append(' '.join(words))
+            questions.append((' '.join(words), wearer))
             state['until'] = 0
         return questions
 
@@ -112,16 +113,18 @@ class OmiApi:
         questions = self._questions(identity, request.query.get('session_id', ''), segments)
         conn = Connection(HttpSocket(), identity, protocol=1, capabilities={},
                           slot=f'{identity.device}#omi-{uuid4().hex}')
-        turns = [(uuid4().hex, text) for text in questions]
-        conn.asking.update((turn_id, monotonic()) for turn_id, _ in turns)
-        turn_ids = {turn_id for turn_id, _ in turns}
+        turns = [(uuid4().hex, text, wearer) for text, wearer in questions]
+        conn.asking.update((turn_id, monotonic()) for turn_id, _, _ in turns)
+        turn_ids = {turn_id for turn_id, _, _ in turns}
         reply = None
         try:
             await self.adapter.registry.add(conn)
             await self.adapter._flush_outbox(conn)
             start = len(conn.ws.frames)
-            for turn_id, text in turns:
-                self.adapter._spawn(self.adapter._process_query(conn, {'type': 'query', 'id': turn_id, 'text': text}))
+            for turn_id, text, wearer in turns:
+                # Only the wearer's own marked speech may answer an approval (anyone nearby can be transcribed).
+                frame = {'type': 'query', 'id': turn_id, 'text': text, 'wearer': wearer}
+                self.adapter._spawn(self.adapter._process_query(conn, frame))
             if turns:
                 await _wait_for(conn.ws, lambda frames: all(
                     _terminal(frames, turn_id, start) is not None for turn_id in turn_ids), self.omi_wait)

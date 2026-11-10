@@ -11,7 +11,7 @@ Your own Hermes agent on smart glasses and voice devices: it sees what you see, 
 [![Hermes >= 0.22.2](https://img.shields.io/badge/Hermes-%3E%3D%200.22.2-6f42c1)](https://hermes-agent.nousresearch.com)
 [![CI](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml)
 
-> **Status: v0.6.1 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
+> **Status: v0.6.2 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
 > simulators and a real Hermes gateway with real models ([evidence](docs/evidence/M0-live-proof.md)); CI tests it on
 > Hermes v0.22.2, v0.23.0 and `main`. Each device path below was run against a real Hermes gateway with a simulated
 > device; no real glasses, watch, voice box or pendant has been tested yet.
@@ -167,7 +167,8 @@ Omi calls. Replies taking longer than `omi_wait` seconds (default 20, `GLASSES_O
 transcript call, as do pushes sent while the pendant is offline. Messages start with `Hermes: ` so even short
 answers display. Within 1000 characters, items appear oldest first; an item that exceeds the remaining room
 keeps its head and ends in `…`, counting as shown. Items with no room stay queued for the next call.
-When a call has no `is_user: true` segment, every speaker counts, so anyone nearby can answer an approval.
+When a call has no `is_user: true` segment, every speaker counts for questions, but only speech marked
+`is_user: true` (your own voice) can answer an approval.
 Overlapping webhook calls can show the same push twice. Session buffers expire after ten minutes idle and
 retain at most 256 segment keys and 32 sessions per device identity. This path is tested with fakes;
 no Omi account has been tested.
@@ -255,10 +256,15 @@ The agent gets three tools (toolset `glasses`) while it talks to a glasses user:
 - **Photos.** Photos from the glasses are saved in Hermes's own image cache, like photos sent from any other channel.
 - **New session.** The device's new-session button answers Hermes's `/new` confirmation for that user's own session.
 - **Approvals by voice or button.** When the agent wants to run a dangerous command, the glasses ask a short question
-  ("Hermes wants to run: … Say yes to allow it once, or no to block it."). Only a whole "yes" (allow once, never for
-  the session or always) or "no" from one of that user's own devices answers it; anything else goes to the agent as
-  usual. Devices with buttons get the same approval as a card and can pick any choice Hermes offers for that request.
-  Typed `/approve` and `/deny` still work. The plugin never answers an approval by itself.
+  ("Hermes wants to run: … Say yes to allow it once, or no to block it."). The question carries the whole command,
+  up to 300 characters. Only a whole "yes" (allow once, never for the session or always) or "no" from one of that
+  user's own devices answers it; anything else goes to the agent as usual. Devices with buttons get the same approval
+  as a card and can pick any choice Hermes offers for that request. A longer command is shown clipped, so a device
+  can only block it: a spoken yes or an approve button does nothing, and you allow it with a typed `/approve` after
+  reading the full command. The same goes for a spoken yes when a device heard the prompt through Hermes's
+  text-to-speech and the speech dropped part of the command (it skips paths and web addresses). The G2 app offers
+  only Deny when its lens cannot show the whole command. Typed `/approve` and `/deny` still work. The plugin never
+  answers an approval by itself.
 - **Speech.** Recordings from devices are transcribed, and spoken answers made, with Hermes's own speech settings
   (`stt` and `tts` in Hermes's config). With a cloud speech provider, the recording or the reply text goes to that
   provider, as it does for voice messages on any other channel. Recordings are cached like other Hermes audio.

@@ -1,6 +1,20 @@
 import {HermesGlassesClient} from '../../js/hermes-glasses.js';
 export const LENS_CHARS = 400;
 const PROMPT_HEIGHT = 112;  // approval page: the request text above the choices
+export const PROMPT_CHARS = 160;  // what fits in that text box
+export function lensPrompt(text) {
+  const prompt = String(text || 'Hermes approval');
+  return prompt.length > PROMPT_CHARS ? prompt.slice(0, PROMPT_CHARS - 1) + '…' : prompt;
+}
+// A command the lens cannot show whole can only be denied from the glasses (a typed /approve still allows it).
+export function lensChoices(frame) {
+  const command = typeof frame.command === 'string' ? frame.command : '';
+  const text = String(frame.text || '');
+  const visible = text.length > PROMPT_CHARS ? text.slice(0, PROMPT_CHARS - 1) : text;
+  // A line break can push part of the command below the text box, which does not scroll.
+  const whole = command && !/[\r\n]/.test(command) && visible.includes(command);
+  return whole ? frame.choices : frame.choices.filter(choice => choice === 'deny');
+}
 const PROMPTS = new Set(['clarify', 'approval']);  // Hermes waits on these: they never wait for the turn
 export function label63(value) {
   let out = '';
@@ -13,6 +27,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   let prompt = null, chain = null, forPrompt = false, answering = null;  // a question Hermes asked mid-turn; one abort for the turn's asks
   let queue = Promise.resolve();
   const pushes = [], approvals = [];
+  let onLens = null;  // the approval whose card is drawn: taps answer only that one, never one still being drawn
   const serial = fn => (queue = queue.then(fn).catch(() => { fail(); }));
   function show(kind, text) {
     if (closed) return;
@@ -31,20 +46,26 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   function next() {
     if (closed || approval || recording) return;
     if (approvals.length) {
-      approval = approvals.shift(); selected = 0;
+      approval = approvals.shift(); selected = 0; onLens = null;
       show('approval', approval.text || 'Hermes approval');
       const request = approval;
       serial(async () => {
         // What is being approved stays on the lens above the choices; only the list takes touchpad events.
         const {content: _text, ...frame} = textBox;  // the bridge rejects text-only fields on a list container
-        const prompt = String(request.text || 'Hermes approval');
-        await bridge.rebuildPageContainer({containerTotalNum: 2,
+        let drawn = false;
+        page = 'list';  // whatever is on the lens now, the next text view rebuilds the whole page
+        try { drawn = await bridge.rebuildPageContainer({containerTotalNum: 2,
           textObject: [{...textBox, containerID: 2, containerName: 'prompt', yPosition: 0, height: PROMPT_HEIGHT,
-            isEventCapture: 0, content: prompt.length > 160 ? prompt.slice(0, 159) + '…' : prompt}],
+            isEventCapture: 0, content: lensPrompt(request.text)}],
           listObject: [{...frame, containerID: 1, containerName: 'choices', yPosition: PROMPT_HEIGHT,
             height: textBox.height - PROMPT_HEIGHT, isEventCapture: 1,
-            itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]});
-        page = 'list';
+            itemContainer: {itemCount: request.choices.length, itemName: request.choices.map(label63), isItemSelectBorderEn: 1}}]}) === true; }
+        catch { drawn = false; }
+        if (approval !== request) return;
+        if (drawn) { onLens = request; return; }
+        // Not drawn (the bridge returned false or threw): this card is never answerable from the touchpad. Answer it
+        // by voice or a typed /approve or /deny; the lens shows the error and the touchpad works again.
+        approval = null; onLens = null; fail(); next();
       });
     } else if (prompt) {
       show('push', `${prompt.note ? prompt.note + '\n' : ''}Hermes asks\n${prompt.text}\nTap to answer`);
@@ -59,7 +80,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     const index = approvals.findIndex(item => item.id === id);
     if (index >= 0) approvals.splice(index, 1);
     if (approval?.id !== id) return;
-    approval = null; show(turn ? 'thinking' : 'answer', transcript + '\n' + answer); next();
+    approval = null; onLens = null; show(turn ? 'thinking' : 'answer', transcript + '\n' + answer); next();
   }
   function settle(result) { transcript = result.transcript || transcript; answer = result.text; show('answer', `${transcript}\n${answer}`); }
   async function ask(query) {
@@ -104,6 +125,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
   async function tap() {
     if (micBusy || closed) return;
     if (approval) {
+      if (onLens !== approval) return;  // the lens still shows the previous card (or nothing yet)
       const id = approval.id, choice = approval.choices[selected];
       if (approval.sending) return;
       approval.sending = true;
@@ -133,7 +155,7 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
     fail, ask, tap,
     async store(key, value) { let saved = false; await serial(async () => { saved = await bridge.setLocalStorage(key, value); }); return saved; },
     pcm(chunk) { if (recording) chunks.push(new Uint8Array(chunk)); },
-    select(index) { if (approval && Number.isInteger(index) && index >= 0 && index < approval.choices.length) selected = index; },
+    select(index) { if (approval && onLens === approval && Number.isInteger(index) && index >= 0 && index < approval.choices.length) selected = index; },
     async connect(url, token) {
       client?.disconnect();
       client = new HermesGlassesClient({url, token, WebSocketImpl, device: {name: 'Even G2', model: 'G2',
@@ -150,7 +172,9 @@ export function createG2(bridge, textBox, mirror = (_state, _text) => {}, WebSoc
       client.on('display', frame => { pushes.push({origin: 'display', text: frame.text}); if (!turn && !recording && !approval) next(); });
       client.on('approval_request', frame => {
         if (!Array.isArray(frame.choices) || !frame.choices.length || frame.choices.length > 20) { fail(); return; }
-        approvals.push({...frame, choices: frame.choices}); next();
+        const choices = lensChoices(frame);
+        if (!choices.length) { fail(); return; }
+        approvals.push({...frame, choices}); next();
       });
       client.on('approval_closed', frame => dismiss(frame.id));
       // An error that names its query is handled by that query's ask; only operation-wide errors show here.
