@@ -416,7 +416,7 @@ class GlassesAdapter(BasePlatformAdapter):
         user = conn.identity.user
         # A yes or no while an approval waits is handled here (a typed /approve or /deny goes to Hermes as is).
         # Checked even before this adapter showed any approval: Hermes may be waiting on one it asked as text.
-        if not text.startswith('/'):
+        if not text.startswith('/') and self._approval_queued(user):
             hermes_words = hermes_approval_words()
             raw = text.lower()
             choice = hermes_words[raw] if raw in hermes_words else spoken_choice(text)
@@ -830,6 +830,20 @@ class GlassesAdapter(BasePlatformAdapter):
             self._approvals.pop(user, None)
         return live
 
+    def _approval_sessions_of(self, user):
+        source = self.build_source(chat_id=user, chat_name=user, chat_type='dm', user_id=user, user_name=user)
+        own_session = self._source_session_key(source)
+        return own_session, self._approval_sessions.get(user, set()) | {own_session}
+
+    def _approval_queued(self, user):
+        """Hermes waits on an approval in one of this user's sessions (a cheap check before any word matching)."""
+        from tools.approval import list_gateway_approvals
+        if any(list_gateway_approvals(key) for key in self._approval_sessions_of(user)[1]):
+            return True
+        if self._approvals.get(user):
+            self._live_approvals(user)  # all ended: forget them and close their cards
+        return False
+
     async def _answer_approval(self, conn, query_id, choice, wearer=True):
         """Answer the one approval this user's devices are waiting on with a spoken yes or no (`choice` None: an
         approval word that asks for more than once, like "always").
@@ -843,9 +857,7 @@ class GlassesAdapter(BasePlatformAdapter):
         from tools.approval import list_gateway_approvals
         from tools import clarify_gateway
         user = conn.identity.user
-        source = self.build_source(chat_id=user, chat_name=user, chat_type='dm', user_id=user, user_name=user)
-        own_session = self._source_session_key(source)
-        sessions = self._approval_sessions.get(user, set()) | {own_session}
+        own_session, sessions = self._approval_sessions_of(user)
         queued = {d.get('request_id') for key in sessions for d in list_gateway_approvals(key)}
         if not queued:
             self._live_approvals(user)

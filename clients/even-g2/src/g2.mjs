@@ -11,7 +11,9 @@ export function lensChoices(frame) {
   const command = typeof frame.command === 'string' ? frame.command : '';
   const text = String(frame.text || '');
   const visible = text.length > PROMPT_CHARS ? text.slice(0, PROMPT_CHARS - 1) : text;
-  return command && visible.includes(command) ? frame.choices : frame.choices.filter(choice => choice === 'deny');
+  // A line break can push part of the command below the text box, which does not scroll.
+  const whole = command && !/[\r\n]/.test(command) && visible.includes(command);
+  return whole ? frame.choices : frame.choices.filter(choice => choice === 'deny');
 }
 const PROMPTS = new Set(['clarify', 'approval']);  // Hermes waits on these: they never wait for the turn
 export function label63(value) {

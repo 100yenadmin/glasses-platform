@@ -261,6 +261,8 @@ test('an approval card whose command the lens cannot show whole offers deny only
   assert.deepEqual(lensChoices({text, command, choices}), ['deny']);
   assert.deepEqual(lensChoices({text: 'Hermes wants to run: ls. Say yes.', command: 'ls', choices}), choices);
   assert.deepEqual(lensChoices({text: 'Hermes wants to run: ls.', choices}), ['deny']);  // no command: deny only
+  const lines = 'echo ok' + '\n'.repeat(6) + 'rm -rf ~/';  // short, but the rm line may sit below the box
+  assert.deepEqual(lensChoices({text: `Hermes wants to run: ${lines}.`, command: lines, choices}), ['deny']);
   const {app, socket, pages} = await connectedApp(t);
   socket.frame({type: 'approval_request', id: 'long', text, command, choices}); await flush();
   assert.deepEqual(pages.at(-1).listObject[0].itemContainer.itemName, ['deny']);
