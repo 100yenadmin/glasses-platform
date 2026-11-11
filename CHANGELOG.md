@@ -2,6 +2,15 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.6 (2026-11-11): reminders reach your other devices at once
+
+- **Released pushes go straight to your other devices.** When a device disconnects (or an HTTP, Omi, Pebble or
+  xiaozhi request ends) before it received or acknowledged a push, that push now goes at once to the user's other
+  connected devices. Before, it waited until one of them sent something or reconnected. Nothing was lost either
+  way. A device that already holds the push (waiting for an acknowledgement, held while a v0 device waits for its
+  answer, or in an HTTP answer) never gets it twice.
+- Steadier push-hold tests (wider timing margins).
+
 ## 0.6.5 (2026-11-11): the demo film on the README
 
 Docs only. The demo film now plays on the README itself, under the demo link, so you can watch it without X. No code
