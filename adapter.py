@@ -353,14 +353,22 @@ class GlassesAdapter(BasePlatformAdapter):
             conn.flush_task.cancel()
         if conn.held_task:
             conn.held_task.cancel()
-        # Never settled or still held: keep its pushes for the next connection, unless another device already
-        # received them.
+        # Never settled or still held: keep its pushes for another connection, unless a device already received them.
         delivered = self._delivered.get(conn.identity.user, ())
         left = [*conn.pending, *conn.held, *conn.unacked.values()]
-        self.outbox.merge(conn.identity.user, [item for item in left if item[3] not in delivered])
+        queued = [item for item in left if item[3] not in delivered]
+        self.outbox.merge(conn.identity.user, queued)
         self.outbox.forget([item[3] for item in left if item[3] in delivered])
         conn.pending, conn.held = [], []
         conn.unacked.clear()
+        if queued:
+            self._spawn(self._redeliver(conn))
+
+    async def _redeliver(self, released):
+        """Send pushes a released connection left behind to the user's other settled devices (unsettled ones flush
+        once their protocol is known). Each device skips the pushes it already holds, so none arrives twice."""
+        for conn in [c for c in self.registry.live(released.identity.user) if c is not released]:
+            await self._flush_outbox(conn, again=True)
 
     async def _new_session(self, conn, query_id=None):
         conn.last_photo_at = 0
@@ -471,14 +479,23 @@ class GlassesAdapter(BasePlatformAdapter):
             return [turn.conn] if turn.conn in live else []
         return live
 
-    async def _flush_outbox(self, conn):
+    async def _flush_outbox(self, conn, again=False):
+        """Write the user's queued pushes to `conn`: its first flush, or (`again`) a settled device catching up on
+        pushes another connection left behind."""
         user = conn.identity.user
         async with self._lock(user):
-            if conn.flushed:
+            if conn.flushed != again:
                 return
             conn.flushed = True
-            items = sorted({item[3]: item for item in [*self.outbox.drain(user), *conn.pending]}.values(),
-                           key=lambda item: item[0])
+            queued = self.outbox.drain(user)
+            if again:  # never resend what this device already holds, awaits an ack for, or carries in its HTTP answer
+                has = {item[3] for item in [*conn.pending, *conn.held, *conn.unacked.values(),
+                                            *(item for item, _ in conn.sent_items)]}
+                kept = [item for item in queued if item[3] in has]
+                queued = [item for item in queued if item[3] not in has]
+                if kept:
+                    self.outbox.merge(user, kept)  # still waiting on another device or this one's ack
+            items = sorted({item[3]: item for item in [*queued, *conn.pending]}.values(), key=lambda item: item[0])
             conn.pending, sent = [], 0
             try:
                 for item in items:
