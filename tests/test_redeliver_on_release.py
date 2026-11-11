@@ -148,3 +148,72 @@ async def test_redelivery_to_http_slot_waits_for_its_answer_to_count_as_delivere
     assert [item[3] for item, _ in other.sent_items] == [sent.message_id]
     assert sent.message_id not in adapter._delivered.get('alice', ())
     assert [item[3] for item in Outbox(path=adapter.outbox.path).drain('alice')] == [sent.message_id]
+
+
+# Review of #68: a push another live device already holds (unacked, held for a waiting v0 device, or in an HTTP
+# answer) is never sent to it a second time by the redelivery.
+import time as _time
+from glasses_plugin.devices import Connection as _Connection, Identity as _Identity
+from glasses_plugin.http_api import HttpSocket as _HttpSocket
+
+
+def _push_ids(conn):
+    return [f['id'] for f in conn.ws.frames if f['type'] in ('push', 'response')]
+
+
+@pytest.mark.asyncio
+async def test_two_ack_devices_never_get_a_push_twice(make_adapter):
+    adapter = make_adapter()
+    first = await device(adapter, ack=True)
+    other = await device(adapter, 'phone', ack=True)
+    sent = await adapter.send('alice', 'R.', metadata={'origin': 'cron'})
+    first.ws.closed = True
+    adapter._release(first)
+    await drained(adapter)
+    assert _push_ids(other) == [sent.message_id]
+    assert sent.message_id in other.unacked  # still durable until the phone acks
+
+
+@pytest.mark.asyncio
+async def test_unsettled_leftover_is_not_resent_to_an_ack_device_that_has_it(make_adapter):
+    adapter = make_adapter()
+    first = await device(adapter)
+    first.flushed = False
+    other = await device(adapter, 'phone', ack=True)
+    sent = await adapter.send('alice', 'R.', metadata={'origin': 'cron'})
+    first.ws.closed = True
+    adapter._release(first)
+    await drained(adapter)
+    assert _push_ids(other) == [sent.message_id]
+
+
+@pytest.mark.asyncio
+async def test_an_http_answer_never_carries_a_push_twice(make_adapter):
+    adapter = make_adapter()
+    first = await device(adapter, ack=True)
+    other = _Connection(_HttpSocket(), _Identity('alice', 'phone'), protocol=1, slot='phone#http', flushed=True)
+    await adapter.registry.add(other)
+    await adapter.send('alice', 'R.', metadata={'origin': 'cron'})
+    first.ws.closed = True
+    adapter._release(first)
+    await drained(adapter)
+    assert len(other.sent_items) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_v0_device_hears_a_held_push_once(make_adapter):
+    adapter = make_adapter()
+    first = await device(adapter, ack=True)
+    other = await device(adapter, 'phone', version=0)
+    other.asking['q1'] = _time.monotonic()
+    sent = await adapter.send('alice', 'R.', metadata={'origin': 'cron'})
+    assert [item[3] for item in other.held] == [sent.message_id]
+    first.ws.closed = True
+    adapter._release(first)
+    for _ in range(20):  # let the redelivery run; drained() would also wait out the 120 s hold timer
+        await asyncio.sleep(0)
+    assert [item[3] for item in other.held] == [sent.message_id]
+    timer = other.held_task
+    await adapter._answered(other, 'q1')
+    await asyncio.gather(timer, return_exceptions=True)
+    assert [f.get('text') for f in other.ws.frames].count('R.') == 1
