@@ -113,6 +113,8 @@ def _requeue(adapter, conn, reply=None, turn_id=None, shown=None):
         key = hashlib.sha256(json.dumps([user, turn_id]).encode()).hexdigest()[:32]
         items.append((time.time(), reply, 'reply', f'reply-{key}'))
     adapter.outbox.merge(user, items)
+    if items:  # the request is already released: the user's other live devices catch up now, as after _release
+        adapter._spawn(adapter._redeliver(conn))
 
 
 async def _send(request, adapter, conn, response, shown, reply=None, turn_id=None):
