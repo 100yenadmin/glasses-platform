@@ -217,3 +217,31 @@ async def test_a_waiting_v0_device_hears_a_held_push_once(make_adapter):
     await adapter._answered(other, 'q1')
     await asyncio.gather(timer, return_exceptions=True)
     assert [f.get('text') for f in other.ws.frames].count('R.') == 1
+
+
+@pytest.mark.asyncio
+async def test_pushes_an_http_answer_failed_to_carry_reach_a_live_device(make_adapter):
+    from glasses_plugin.http_api import _requeue
+    adapter = make_adapter()
+    other = await device(adapter, 'phone')
+    item = (time.time(), 'Stretch.', 'cron', 'm-http')
+    slot = Connection(HttpSocket(), Identity('alice', 'watch'), protocol=1, slot='watch#http', flushed=True)
+    slot.sent_items.append((item, {'type': 'push', 'id': 'm-http', 'text': 'Stretch.', 'origin': 'cron'}))
+    _requeue(adapter, slot)  # the HTTP answer was not written; the request is already released
+    await drained(adapter)
+    assert [f['id'] for f in other.ws.frames if f['type'] == 'push'] == ['m-http']
+
+
+@pytest.mark.asyncio
+async def test_a_failed_catch_up_write_keeps_the_push_queued(make_adapter):
+    adapter = make_adapter()
+    first = await device(adapter, ack=True)
+    sent = await adapter.send('alice', 'R.', metadata={'origin': 'cron'})
+    other = await device(adapter, 'phone')
+    async def broken(frame):
+        return False
+    other.send_json = broken  # the surviving device's socket fails during the catch-up
+    await release(adapter, first)
+    assert pushes(other) == []
+    assert [item[3] for item in adapter.outbox.drain('alice')] == [sent.message_id]
+    assert other.flushed is False  # its next frame flushes again
