@@ -353,14 +353,26 @@ class GlassesAdapter(BasePlatformAdapter):
             conn.flush_task.cancel()
         if conn.held_task:
             conn.held_task.cancel()
-        # Never settled or still held: keep its pushes for the next connection, unless another device already
-        # received them.
+        # Never settled or still held: keep its pushes for another connection, unless a device already received them.
         delivered = self._delivered.get(conn.identity.user, ())
         left = [*conn.pending, *conn.held, *conn.unacked.values()]
-        self.outbox.merge(conn.identity.user, [item for item in left if item[3] not in delivered])
+        queued = [item for item in left if item[3] not in delivered]
+        self.outbox.merge(conn.identity.user, queued)
         self.outbox.forget([item[3] for item in left if item[3] in delivered])
         conn.pending, conn.held = [], []
         conn.unacked.clear()
+        if queued:
+            self._spawn(self._redeliver(conn))
+
+    async def _redeliver(self, released):
+        user = released.identity.user
+        async with self._lock(user):
+            # Unsettled devices flush once their protocol is known. Reopen only the settled devices' flush gate.
+            others = [conn for conn in self.registry.live(user) if conn is not released and conn.flushed]
+            for conn in others:
+                conn.flushed = False
+        for conn in others:
+            await self._flush_outbox(conn)
 
     async def _new_session(self, conn, query_id=None):
         conn.last_photo_at = 0
