@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/3c9346f3-18dd-4f7f-a5b0-389c5846e977
 [![Hermes >= 0.22.2](https://img.shields.io/badge/Hermes-%3E%3D%200.22.2-6f42c1)](https://hermes-agent.nousresearch.com)
 [![CI](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml)
 
-> **Status: v0.6.6 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
+> **Status: v0.6.7 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
 > simulators and a real Hermes gateway with real models ([evidence](docs/evidence/M0-live-proof.md)); CI tests it on
 > Hermes v0.22.2, v0.23.0 and `main`. Each device path below was run against a real Hermes gateway with a simulated
 > device; no real glasses, watch, voice box or pendant has been tested yet.
@@ -172,8 +172,9 @@ answers display. Within 1000 characters, items appear oldest first; an item that
 keeps its head and ends in `…`, counting as shown. Items with no room stay queued for the next call.
 When a call has no `is_user: true` segment, every speaker counts for questions, but only speech marked
 `is_user: true` (your own voice) can answer an approval.
-Overlapping webhook calls can show the same push twice. Session buffers expire after ten minutes idle and
-retain at most 256 segment keys and 32 sessions per device identity. This path is tested with fakes;
+Overlapping webhook calls can show the same push twice. Session buffers (in memory only) are dropped once idle for
+ten minutes, at the next webhook call ([#74](https://github.com/100yenadmin/glasses-platform/issues/74) moves this to a
+timer), and retain at most 256 segment keys and 32 sessions per device identity. This path is tested with fakes;
 no Omi account has been tested.
 
 ## Pebble (Bobby)
@@ -277,9 +278,9 @@ The agent gets three tools (toolset `glasses`) while it talks to a glasses user:
   program it runs is a local `ffmpeg` (no shell), and only to convert audio for devices that ask for Ogg or WAV or
   when a spoken answer comes in several parts.
 - **Device credentials** are read through Hermes's per-profile settings reader (the profile's environment file or `config.yaml`).
-- **Offline queue.** Pushes for a disconnected device wait (50 items, 24 hours) in memory and in
-  `~/.hermes/glasses/outbox.json` (readable only by you), so they survive a gateway restart, even a crash. A message leaves
-  the file once it has been sent to a device. `GLASSES_OUTBOX_PERSIST=off` keeps the queue in memory only.
+- **Offline queue.** Pushes for a disconnected device wait (the newest 50 per user, delivered only within 24 hours) in
+  memory and in `~/.hermes/glasses/outbox.json` (readable only by you), so they survive a gateway restart, even a crash.
+  A message leaves the file once it has been sent to a device; an expired one leaves it at the next change to the queue. `GLASSES_OUTBOX_PERSIST=off` keeps the queue in memory only.
 
 ## Why a plugin rather than a bridge script
 
