@@ -80,9 +80,8 @@ of its own and no telemetry.
   queue, not on a timer. A message leaves the file once a device has it. `GLASSES_OUTBOX_PERSIST=off` keeps the queue
   in memory only.
 - Omi transcript segments: in memory only, at most 256 per conversation and 32 conversations per device. A
-  conversation idle for ten minutes is dropped at the next Omi webhook call, and all of them at a gateway restart.
-  Dropping them on a timer, as the disclosure says, is
-  [#74](https://github.com/100yenadmin/glasses-platform/issues/74).
+  timer drops a conversation once it has been idle for ten minutes (since 0.6.8), and a gateway restart drops them
+  all.
 
 **Network**
 - The plugin makes no outbound network requests of its own and sends no telemetry.

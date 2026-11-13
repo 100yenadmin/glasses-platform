@@ -253,7 +253,7 @@ access alone is insufficient. See [setup](../README.md#omi-pendant). The plugin 
   Only a question made entirely of `is_user:true` speech (the wearer's own voice) can answer an approval
   (since 0.6.2). Repeated segments with the same start time and text are ignored within that device's
   session, retaining the newest 256 keys. After ten minutes without a call, session state
-  expires (pruned on the next call). Each device identity keeps at most 32 sessions, evicting the least
+  expires (dropped by a timer, since 0.6.8). Each device identity keeps at most 32 sessions, evicting the least
   recently used.
 - Each question is an ordinary v1 query on a short-lived connection with capabilities `{}`. The webhook
   waits up to `omi_wait` seconds (`GLASSES_OMI_WAIT`, default 20) for its reply or an approval/clarify prompt.
