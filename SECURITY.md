@@ -45,8 +45,8 @@ through them; the agent can take a glasses camera photo at any time during a gla
 captured automatically on visual keywords (`auto_capture: off` disables that), saved in Hermes's image cache;
 recordings and spoken replies use Hermes's own stt/tts settings, so a cloud speech provider receives the audio or
 text; pushes for offline devices are kept in `$HERMES_HOME/glasses/outbox.json` (owner-only); Omi transcript
-segments are held in memory until the session has been idle for ten minutes (the newest 256 per session); the device's new-session button answers Hermes's
-`/new` confirmation for that user; it runs a local ffmpeg (no shell) only to convert audio; no outbound network calls
+segments are held in memory until the session has been idle for ten minutes (the newest 256 per session); the
+device's new-session button answers Hermes's `/new` confirmation for that user; it runs a local ffmpeg (no shell) only to convert audio; no outbound network calls
 of its own and no telemetry.
 
 ## Boundaries
