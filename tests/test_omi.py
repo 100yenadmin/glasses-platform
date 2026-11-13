@@ -490,3 +490,29 @@ async def test_failed_write_queues_each_reply_once(server, monkeypatch):
     monkeypatch.undo()
     texts = [item[1] for item in adapter.outbox.drain('alice')]
     assert sorted(texts) == ['P' * 900, 'R' * 300]
+
+
+async def test_idle_session_is_dropped_by_timer_without_another_call(server, monkeypatch):
+    from glasses_plugin import omi
+    adapter, client = server
+    monkeypatch.setattr(omi, 'SESSION_SECONDS', 0.2)
+    reply_with(adapter)
+    await post(client, segment('Hermes, hello'))
+    api = api_for(adapter)
+    assert len(api.sessions) == 1
+    await asyncio.sleep(0.5)  # no further webhook call arrives
+    assert api.sessions == {} and api._timer is None
+
+
+async def test_timer_rearms_for_a_session_still_active(server, monkeypatch):
+    from glasses_plugin import omi
+    adapter, client = server
+    monkeypatch.setattr(omi, 'SESSION_SECONDS', 0.4)
+    await post(client)
+    await asyncio.sleep(0.25)
+    await post(client, url=URL.replace('live', 'later'))
+    api = api_for(adapter)
+    await asyncio.sleep(0.3)  # the first session is idle past the window; the second is not
+    assert [key[1] for key in api.sessions] == ['later'] and api._timer is not None
+    await asyncio.sleep(0.4)
+    assert api.sessions == {} and api._timer is None
