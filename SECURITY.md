@@ -45,7 +45,7 @@ through them; the agent can take a glasses camera photo at any time during a gla
 captured automatically on visual keywords (`auto_capture: off` disables that), saved in Hermes's image cache;
 recordings and spoken replies use Hermes's own stt/tts settings, so a cloud speech provider receives the audio or
 text; pushes for offline devices are kept in `$HERMES_HOME/glasses/outbox.json` (owner-only); Omi transcript
-segments are held in memory for up to ten minutes per session; the device's new-session button answers Hermes's
+segments are held in memory until the session has been idle for ten minutes (the newest 256 per session); the device's new-session button answers Hermes's
 `/new` confirmation for that user; it runs a local ffmpeg (no shell) only to convert audio; no outbound network calls
 of its own and no telemetry.
 
@@ -80,8 +80,8 @@ of its own and no telemetry.
   queue, not on a timer. A message leaves the file once a device has it. `GLASSES_OUTBOX_PERSIST=off` keeps the queue
   in memory only.
 - Omi transcript segments: in memory only, at most 256 per conversation and 32 conversations per device. A
-  timer drops a conversation once it has been idle for ten minutes (since 0.6.8), and a gateway restart drops them
-  all.
+  timer drops a conversation once it has been idle for ten minutes (since 0.6.8). A conversation that stays active
+  keeps its newest 256 segments. Stopping or restarting the gateway drops them all.
 
 **Network**
 - The plugin makes no outbound network requests of its own and sends no telemetry.

@@ -50,6 +50,13 @@ class OmiApi:
         self._prune(monotonic())
         self._arm()
 
+    async def close(self, _app=None):
+        """The listener is shutting down: drop every buffer and the timer with it."""
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self.sessions.clear()
+
     def _questions(self, identity, session_id, segments):
         now = monotonic()
         self._prune(now)
@@ -172,3 +179,4 @@ class OmiApi:
 def register_routes(adapter, app):
     api = OmiApi(adapter)
     app.router.add_post('/omi/{token}/transcript', api.transcript)
+    app.on_cleanup.append(api.close)
