@@ -2,6 +2,15 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.8 (2026-11-13): Omi buffers expire on time
+
+- **Omi: idle transcript buffers are dropped after ten minutes, on a timer.** The plugin keeps the recent transcript
+  segments of each Omi conversation in memory, to spot a wake phrase and skip repeated segments. A conversation idle
+  for ten minutes used to be dropped only when the next Omi webhook call arrived, so with no further call its
+  segments stayed in memory until the gateway restarted. A timer now drops it after ten minutes idle, as the catalog
+  disclosure says. Stopping the gateway drops every buffer at once. An active conversation keeps at most its newest
+  256 segments ([#74](https://github.com/100yenadmin/glasses-platform/issues/74)).
+
 ## 0.6.7 (2026-11-13): a bug form, a security policy and agent notes
 
 Docs only, no code changes.
