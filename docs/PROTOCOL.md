@@ -249,9 +249,10 @@ access alone is insufficient. See [setup](../README.md#omi-pendant). The plugin 
   whose following text does not start with `'s` or `’s`; “Hermes's docs are great” does not wake it.
   The following words become the query. A wake phrase alone arms an eight-second
   window for subsequent segments in that session; eligible segments in the completing call are joined.
-  A call with any `is_user:true` segments uses only those segments; otherwise all speakers count, so anyone
-  nearby can answer an approval. Repeated segments with the same start time and text are ignored within
-  that device's session, retaining the newest 256 keys. After ten minutes without a call, session state
+  A call with any `is_user:true` segments uses only those segments; otherwise all speakers count for questions.
+  Only a question made entirely of `is_user:true` speech (the wearer's own voice) can answer an approval
+  (since 0.6.2). Repeated segments with the same start time and text are ignored within that device's
+  session, retaining the newest 256 keys. After ten minutes without a call, session state
   expires (pruned on the next call). Each device identity keeps at most 32 sessions, evicting the least
   recently used.
 - Each question is an ordinary v1 query on a short-lived connection with capabilities `{}`. The webhook

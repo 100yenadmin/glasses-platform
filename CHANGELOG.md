@@ -2,6 +2,20 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.7 (2026-11-13): a bug form, a security policy and agent notes
+
+Docs only, no code changes.
+- **Bug form.** New issues open a form that asks for the plugin and Hermes versions, the device and short log lines.
+  It warns never to paste a device token, connect URL, QR code or photo.
+- **SECURITY.md** says how to report a problem privately and what counts as a security problem. It also restates the
+  catalog disclosure and the plugin's boundaries.
+- **AGENTS.md** covers the layout, how to run the checks, and the rules a change must keep.
+- The design plan is marked historical, and the roadmap shows the catalog milestone (M3) done.
+- **Retention, stated exactly.** The README and SECURITY.md now say how long Omi transcript segments and queued
+  pushes are kept. Idle Omi buffers are dropped at the next webhook call, not on a timer; a timer is
+  [#74](https://github.com/100yenadmin/glasses-platform/issues/74). The protocol doc no longer says anyone nearby can
+  answer an Omi approval: since 0.6.2 only your own marked speech can.
+
 ## 0.6.6 (2026-11-11): reminders reach your other devices at once
 
 - **Released pushes go straight to your other devices.** When a device disconnects (or an HTTP, Omi, Pebble or
