@@ -1,0 +1,9 @@
+# Keep blank issues available for questions, feature requests and new devices.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/100yenadmin/glasses-platform/security/advisories/new
+    about: A request accepted without a valid token, one user reaching another's session, or an exposed token or photo. Please don't open a public issue.
+  - name: Problem in Hermes Agent itself
+    url: https://github.com/NousResearch/hermes-agent/issues
+    about: Bugs in Hermes core, not in this plugin, belong upstream.
