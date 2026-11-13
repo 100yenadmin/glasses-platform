@@ -40,7 +40,8 @@ Hermes gateway with real models only; no real glasses or phone app yet (that is 
 - [x] Durable outbox: queued pushes survive a gateway restart (0.3.0); `ack` from v1 devices (0.4.0)
 - [x] `hermes glasses pair <user> <device>`: mint a device token and print a QR / connect URL (0.2.0), plus
   `devices`, `revoke` and `try` (talk to your agent from the terminal as a pair of glasses with a camera)
-- [ ] CI matrix (pinned Hermes release + main), community kit, product-page README
+- [x] CI matrix (Hermes v0.22.2, v0.23.0 and main), product-page README (0.6.1), community kit (bug form, SECURITY.md,
+  AGENTS.md)
 
 **Exit criteria:** every M1 frame is covered by tests, and the live proof covers voice in, voice out and approvals.
 

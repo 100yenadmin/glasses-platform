@@ -1,7 +1,8 @@
 # glasses-platform — design plan
 
-Status: **M0 planning** (2026-10-19). No code has landed yet. See [ROADMAP.md](../ROADMAP.md) for milestones and
-[PROTOCOL.md](PROTOCOL.md) for the device wire protocol.
+Status: **historical.** This is the M0 design plan, written on 2026-10-19 before any code landed. It is kept as the
+record of the original design decisions. For what has shipped since, see the [CHANGELOG](../CHANGELOG.md); for what
+is next, see [ROADMAP.md](../ROADMAP.md); for the device wire protocol, see [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Problem
 
