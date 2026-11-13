@@ -40,8 +40,10 @@ CI runs the Python suites and `hermes plugins validate` on Hermes v0.22.2, v0.23
 
 - **Fail closed.** With no device token configured the listener never starts. Never add a route that skips
   `authenticate`, and never let one user's token reach another user's session or devices.
-- **No tokens anywhere but the profile's `.env` or `config.yaml`.** Never log, print or return a token. Test
-  fixtures build tokens at run time: no literal `token="<long value>"` strings (Hermes's install scanner flags them).
+- **No tokens anywhere but the profile's `.env` or `config.yaml`.** The one exception is `hermes glasses pair`, which
+  shows the new device's connect URL and QR code once, to the person pairing it. Never log, return or otherwise print a
+  token. Test fixtures build tokens at run time: no literal `token="<long value>"` strings (Hermes's install scanner
+  flags them).
 - **Approvals:** only a whole yes or no, or a button, from the user's own device answers one, and a clipped command
   can only be denied from a device. The plugin never answers an approval by itself.
 - **Protocol changes** update [docs/PROTOCOL.md](docs/PROTOCOL.md) and the conformance kit in the same change, and

@@ -31,7 +31,8 @@ We aim to acknowledge reports within 3 business days and to share a decision or 
 
 ## Disclosure
 
-This is the text the Hermes plugin catalog shows for this plugin.
+This is the text the Hermes plugin catalog shows for this plugin. The retention notes under Boundaries below are more
+precise than it is.
 
 Opens an unencrypted listener on all interfaces (port 8765: WebSocket `/voice`, `/xiaozhi` and
 `/bobby/<token>/query`; HTTP `/turn`, `/pending`, `/approval`, `/xiaozhi/ota/<token>`, `/omi/<token>/transcript`
@@ -74,8 +75,14 @@ of its own and no telemetry.
 
 **Storage**
 - Device tokens: the profile's `.env` (written by `hermes glasses pair`, removed by `revoke`) or `config.yaml`.
-- The offline queue: `$HERMES_HOME/glasses/outbox.json`, owner-only, 50 items and 24 hours at most.
-  `GLASSES_OUTBOX_PERSIST=off` keeps it in memory only.
+- The offline queue: `$HERMES_HOME/glasses/outbox.json`, owner-only. Each user's queue keeps the newest 50 messages,
+  and a message older than 24 hours is never delivered. Expired messages leave the file at the next change to the
+  queue, not on a timer. A message leaves the file once a device has it. `GLASSES_OUTBOX_PERSIST=off` keeps the queue
+  in memory only.
+- Omi transcript segments: in memory only, at most 256 per conversation and 32 conversations per device. A
+  conversation idle for ten minutes is dropped at the next Omi webhook call, and all of them at a gateway restart.
+  Dropping them on a timer, as the disclosure says, is
+  [#74](https://github.com/100yenadmin/glasses-platform/issues/74).
 
 **Network**
 - The plugin makes no outbound network requests of its own and sends no telemetry.

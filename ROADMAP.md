@@ -53,12 +53,16 @@ Hermes gateway with real models only; no real glasses or phone app yet (that is 
 
 **Exit criteria:** recorded real-device sessions with pass rates. Simulator runs do not count.
 
-## M3 — Catalog 1.0
+## M3 — Catalog 1.0 (done)
 
-- [ ] Hermes plugin catalog entry: pinned sha, house-style banner, real screenshots, a disclosure sentence
-- [ ] Release notes, security model and compatibility table
+- [x] Hermes plugin catalog entry: pinned sha, house-style banner, real screenshots, a disclosure sentence (0.6.2, then
+  re-pinned to 0.6.6)
+- [x] Release notes ([CHANGELOG](CHANGELOG.md) and GitHub releases), security model ([SECURITY.md](SECURITY.md) and
+  the README's "What it does on your machine"), compatibility (Hermes 0.22.2 or later; CI on v0.22.2, v0.23.0 and main)
 
 **Exit criteria:** the catalog PR is merged and `hermes plugins install glasses-platform` works from the catalog.
+Met on 2026-11-13: a fresh Hermes 0.23.1 home with no terminal installed 0.6.6 by name from the live catalog,
+enabled it, paired a device and answered a real photo question.
 
 ## M4 — Any-device core
 
