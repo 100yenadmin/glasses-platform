@@ -53,8 +53,9 @@ CI runs the Python suites and `hermes plugins validate` on Hermes v0.22.2, v0.23
 - **Tests** never use the network, a real `HERMES_HOME` or a real device token. Keep timing assertions generous.
 - **Branches:** branch from `next` and open the pull request against `next`. Releases go from `next` to `main`, and
   `main` always equals the latest release tag.
-- **Agents:** in a change, don't bump versions, tag, or edit the CHANGELOG release headings. The maintainer's
-  release step does that.
+- **Agents:** in a change (a pull request into `next`), don't bump versions, tag, or edit the CHANGELOG release
+  headings. The maintainer's release step does that: a `release/x.y.z` pull request into `main` bumps `plugin.yaml`,
+  `pyproject.toml` and the CHANGELOG heading.
 
 ## Security
 
