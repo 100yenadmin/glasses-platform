@@ -1,4 +1,5 @@
 """Omi's live transcript webhook, carried by the existing short-lived HTTP connection."""
+import asyncio
 import hashlib
 import json
 import re
@@ -26,12 +27,39 @@ class OmiApi:
         self.adapter = adapter
         self.omi_wait = float(extra_or_secret(adapter.config.extra, 'omi_wait', 'GLASSES_OMI_WAIT', 20))
         self.sessions = {}  # (authenticated identity, session_id) -> seen segments and wake deadline
+        self._timer = None  # drops idle sessions even when no further webhook call arrives
 
-    def _questions(self, identity, session_id, segments):
-        now = monotonic()
+    def _prune(self, now):
         for key, state in list(self.sessions.items()):
             if now - state['last_call'] >= SESSION_SECONDS:
                 del self.sessions[key]
+
+    def _arm(self):
+        """One timer for the API: it fires when the oldest session goes idle, prunes, and re-arms while any remain."""
+        if self._timer is not None or not self.sessions:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no event loop (a direct unit call): the next webhook call prunes instead
+        oldest = min(state['last_call'] for state in self.sessions.values())
+        self._timer = loop.call_later(max(oldest + SESSION_SECONDS - monotonic(), 0) + 0.01, self._expire)
+
+    def _expire(self):
+        self._timer = None
+        self._prune(monotonic())
+        self._arm()
+
+    async def close(self, _app=None):
+        """The listener is shutting down: drop every buffer and the timer with it."""
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self.sessions.clear()
+
+    def _questions(self, identity, session_id, segments):
+        now = monotonic()
+        self._prune(now)
         key = (identity, session_id)
         state = self.sessions.pop(key, {'seen': {}, 'until': 0})
         state['last_call'] = now
@@ -39,6 +67,7 @@ class OmiApi:
         sessions = [key for key in self.sessions if key[0] == identity]
         if len(sessions) > MAX_SESSIONS:
             del self.sessions[sessions[0]]
+        self._arm()
         if state['until'] < now:
             state['until'] = 0
         user_only = any(segment.get('is_user') is True for segment in segments)
@@ -150,3 +179,4 @@ class OmiApi:
 def register_routes(adapter, app):
     api = OmiApi(adapter)
     app.router.add_post('/omi/{token}/transcript', api.transcript)
+    app.on_cleanup.append(api.close)
