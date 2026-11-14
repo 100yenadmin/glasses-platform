@@ -84,7 +84,7 @@ def resolve_approval(approval, choice):
 
 def speech_keeps_command(text, command):
     """True when Hermes' speech of `text` still says the whole command. Hermes' text-to-speech cleanup drops paths
-    and URLs (`rm -rf ~/` is heard as "rm -rf"), so a spoken prompt can carry less than the written one."""
+    and URLs (`rm -rf DIR/` is heard as "rm -rf"), so a spoken prompt can carry less than the written one."""
     try:
         from tools.tts_text_normalize import prepare_spoken_text
         return ' '.join(str(command).split()) in prepare_spoken_text(text, max_chars=None)
