@@ -2,6 +2,17 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.9 (2026-11-14): catalog installs work again
+
+- **Installing by name works again.** Hermes's plugin install scanner rated the plugin "dangerous", so
+  `hermes plugins install glasses-platform` was refused, even with `--force`. A code comment in the spoken-approval
+  check used a home-directory `rm -rf` command as its example, and the scanner flags that text even in a comment.
+  The example now reads `rm -rf DIR/`. No behaviour changed
+  ([#82](https://github.com/100yenadmin/glasses-platform/pull/82)).
+- AGENTS.md now makes clear that its rule against bumping versions covers ordinary changes (pull requests into
+  `next`), not the release pull request, which is where the bump happens
+  ([#79](https://github.com/100yenadmin/glasses-platform/pull/79)).
+
 ## 0.6.8 (2026-11-13): Omi buffers expire on time
 
 - **Omi: idle transcript buffers are dropped after ten minutes, on a timer.** The plugin keeps the recent transcript
