@@ -1,7 +1,7 @@
 name: glasses-platform
 kind: platform
 label: Smart glasses
-version: "0.6.8"
+version: "0.6.9"
 author: 100yenadmin
 requires_hermes: ">=0.22.2"
 description: >
