@@ -2,6 +2,19 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.10 (2026-11-18): G2 build tools updated; no plugin changes
+
+No change to the plugin itself: a gateway running 0.6.9 behaves the same.
+- **G2 app build tools: Vite 6.4.6.** The Even Realities G2 app was built with Vite 5.4, which has known security
+  advisories in its development server (and in the esbuild version it uses). It now builds with Vite 6.4.6 and
+  esbuild 0.25.12. These tools are only used to build or preview the G2 app on your computer; nothing from them runs
+  in the plugin or on the glasses. The build and the G2 app's tests are unchanged
+  ([#85](https://github.com/100yenadmin/glasses-platform/pull/85)).
+- **CI** uses current versions of its GitHub actions, pinned to exact commits
+  ([#81](https://github.com/100yenadmin/glasses-platform/pull/81),
+  [#85](https://github.com/100yenadmin/glasses-platform/pull/85)).
+- The original design document is now `docs/DESIGN.md` (it was `docs/PLAN.md`).
+
 ## 0.6.9 (2026-11-14): catalog installs work again
 
 - **Installing by name works again.** Hermes's plugin install scanner rated the plugin "dangerous", so
