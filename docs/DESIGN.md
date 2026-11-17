@@ -1,8 +1,9 @@
-# glasses-platform — design plan
+# glasses-platform — original design
 
-Status: **historical.** This is the M0 design plan, written on 2026-10-19 before any code landed. It is kept as the
-record of the original design decisions. For what has shipped since, see the [CHANGELOG](../CHANGELOG.md); for what
-is next, see [ROADMAP.md](../ROADMAP.md); for the device wire protocol, see [PROTOCOL.md](PROTOCOL.md).
+Status: **historical.** This is the M0 design, written on 2026-10-19 before any code landed. It is kept as the record
+of the original design decisions (it was `docs/PLAN.md` until 0.6.10). For what has shipped since, see the
+[CHANGELOG](../CHANGELOG.md); for what is next, see [ROADMAP.md](../ROADMAP.md); for the device wire protocol, see
+[PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Problem
 
@@ -207,7 +208,7 @@ capture.py         keyword heuristic, photo request/await broker
 tools.py           glasses_capture_photo
 sim/glasses_sim.py CLI simulator (legacy or v1; answers capture_photo from a JPEG; waits for pushes)
 tests/             unit + gated integration (real gateway, fake LLM)
-docs/              PLAN.md, PROTOCOL.md
+docs/              DESIGN.md, PROTOCOL.md
 ```
 
 ## 13. Verification plan (M0 exit)
