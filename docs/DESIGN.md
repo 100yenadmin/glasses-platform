@@ -119,7 +119,7 @@ Details are in [PROTOCOL.md](PROTOCOL.md).
 - Otherwise it emits `push` (v1) or `response` (v0).
 - If no device is connected, the message goes to a bounded in-memory outbox: 50 items, 24 h, flushed on reconnect.
 - Since 0.3.0 the outbox is also kept in `$HERMES_HOME/glasses/outbox.json` (mode 600, replaced atomically on every
-  change), so it survives a gateway restart. Acks from v1 devices are still planned.
+  change), so it survives a gateway restart. Acks from v1 devices followed in 0.4.0.
 
 **D8. Short spoken answers.** The platform hint tells the model that replies are spoken or shown on a tiny lens:
 1–3 short sentences, no markdown, no tables, no raw URLs unless asked.

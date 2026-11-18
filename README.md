@@ -98,7 +98,8 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 | Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode | Bundled v0 simulator |
 | Your own client | [JavaScript client](clients/js/hermes-glasses.js), [Python client](clients/python/README.md), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
 
-Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
+Planned: Android and Wear OS (M9) and Mentra glasses (M11). On the watch list: the Meta AI Connectors endpoint, gated
+on Meta early access.
 
 ## Pair more devices
 
