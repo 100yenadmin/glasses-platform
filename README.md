@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/3c9346f3-18dd-4f7f-a5b0-389c5846e977
 [![Hermes >= 0.22.2](https://img.shields.io/badge/Hermes-%3E%3D%200.22.2-6f42c1)](https://hermes-agent.nousresearch.com)
 [![CI](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/100yenadmin/glasses-platform/actions/workflows/ci.yml)
 
-> **Status: v0.6.10 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
+> **Status: v0.6.11 preview. Not yet tested on real glasses.** The Hermes side is proven against the bundled
 > simulators and a real Hermes gateway with real models ([evidence](docs/evidence/M0-live-proof.md)); CI tests it on
 > Hermes v0.22.2, v0.23.0 and `main`. Each device path below was run against a real Hermes gateway with a simulated
 > device; no real glasses, watch, voice box or pendant has been tested yet.
@@ -98,7 +98,8 @@ glasses ─▶ companion app ─WebSocket─▶ Hermes gateway (glasses platform
 | Meta Ray-Ban (Gen 1/2), Ray-Ban Display, Oakley Meta | The community [hermes-glasses](https://github.com/prasanthsasikumar/hermes-glasses) iOS app speaks protocol v0 in its bridge mode | Bundled v0 simulator |
 | Your own client | [JavaScript client](clients/js/hermes-glasses.js), [Python client](clients/python/README.md), [protocol](docs/PROTOCOL.md) and [conformance kit](conformance/README.md) | Conformance kit |
 
-Planned: Android and Wear OS (M9), Mentra glasses (M11), and the Meta AI Connectors endpoint (gated on Meta early access).
+Planned: Android and Wear OS (M9) and Mentra glasses (M11). On the watch list: the Meta AI Connectors endpoint, gated
+on Meta early access.
 
 ## Pair more devices
 

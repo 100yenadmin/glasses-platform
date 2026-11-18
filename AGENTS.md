@@ -57,6 +57,20 @@ CI runs the Python suites and `hermes plugins validate` on Hermes v0.22.2, v0.23
   headings. The maintainer's release step does that: a `release/x.y.z` pull request into `main` bumps `plugin.yaml`,
   `pyproject.toml` and the CHANGELOG heading.
 
+## Release closeout (required after every release, rc promoted to stable, or GA tag)
+
+After the release is published and its receipt sent:
+
+1. Close every issue the release fully served, with a comment naming the version (never an umbrella/parent issue
+   whose own acceptance is not met).
+2. Tick the boxes it completed on ROADMAP.md, roadmap or tracking issues, and closed issues whose checklists shipped,
+   each with its proof linked (tests or a live proof). Close a milestone once all its issues are closed and its exit
+   criteria are proven.
+3. Update every README / ROADMAP line that names the latest release or what ships next.
+4. Post one closeout line as a comment on the release pull request: issues closed, boxes ticked, docs updated (or
+   "none"). Every release here, including an rc promoted to stable or a GA tag, goes through a `release/x.y.z` pull
+   request into `main`, so that pull request always exists.
+
 ## Security
 
 Report vulnerabilities privately: https://github.com/100yenadmin/glasses-platform/security/advisories/new.
