@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # The SHA-pinned actions in .github/workflows. Version updates go to `next` (changes branch from `next`;
+  # releases go from `next` to `main`). Security updates still open against `main`: never merge those
+  # straight to main; land the fix through `next` and a release.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: next
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

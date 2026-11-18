@@ -6,7 +6,8 @@ Guidance for AI coding agents, and for people, working in this repository.
 
 Hermes Glasses (`glasses-platform`) is a Hermes Agent gateway platform plugin. It adds smart glasses and other
 non-desktop devices as a Hermes channel. All of a person's devices share one session, and their replies, pushes,
-approvals and photos travel over one authenticated listener. The plan and its status are in [ROADMAP.md](ROADMAP.md);
+approvals and photos travel over one authenticated listener. Its goal, users and non-goals are in [VISION.md](VISION.md);
+the plan and its status are in [ROADMAP.md](ROADMAP.md);
 the wire protocol is [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Layout
@@ -34,7 +35,9 @@ PATH=<hermes venv>/bin:$PATH node --test clients/js/test/ clients/even-g2/test/ 
 <hermes venv>/bin/hermes plugins validate .
 ```
 
-CI runs the Python suites and `hermes plugins validate` on Hermes v0.22.2, v0.23.0 and `main`.
+CI runs the Python suites and `hermes plugins validate` on Hermes v0.22.2, v0.23.0 and `main`. The `required-ci`
+ruleset on `main` requires `test (v0.22.2)` and `test (v0.23.0)`; `test (main)` runs against Hermes's moving `main`
+and is not required. Renaming a matrix entry renames its check, so update the ruleset in the same change.
 
 ## Rules
 
