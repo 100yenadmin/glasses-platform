@@ -105,7 +105,8 @@ rates. Simulator runs prove the server side only.
 The largest smartwatch base: a Shortcut on the HTTP route first, then a watchOS app.
 
 - [x] Siri Shortcut recipe (Dictate → `POST /turn` → Speak) with setup steps:
-  [docs/devices/apple-watch.md](docs/devices/apple-watch.md) (0.4.0; the route is tested in `tests/test_http_route.py`)
+  [docs/devices/apple-watch.md](docs/devices/apple-watch.md) (0.4.0). Proof: the route it calls is tested in
+  [tests/test_http_route.py](tests/test_http_route.py).
 - [ ] Test the Shortcut on a real Apple Watch
 - [ ] watchOS app: `/turn` and `/pending`, with push notifications for server messages
 
@@ -114,24 +115,29 @@ The largest smartwatch base: a Shortcut on the HTTP route first, then a watchOS 
 A xiaozhi-compatible endpoint covers the 138+ boards of the open-source xiaozhi firmware.
 
 - [x] xiaozhi-compatible WebSocket endpoint: hello handshake, bearer and Device-Id headers, Opus audio, listen and
-  abort, tts and stt events (0.5.0; `tests/test_xiaozhi.py`)
-- [x] Pairing for xiaozhi devices: `hermes glasses pair <user> <device> --xiaozhi` prints the OTA URL (0.5.0)
-- [x] xiaozhi device simulator: `sim/xiaozhi_sim.py` (0.5.0), used for the real-gateway check
+  abort, tts and stt events (0.5.0). Proof: [tests/test_xiaozhi.py](tests/test_xiaozhi.py).
+- [x] Pairing for xiaozhi devices: `hermes glasses pair <user> <device> --xiaozhi` prints the OTA URL (0.5.0). Proof:
+  the OTA tests in [tests/test_xiaozhi.py](tests/test_xiaozhi.py).
+- [x] xiaozhi device simulator: [sim/xiaozhi_sim.py](sim/xiaozhi_sim.py) (0.5.0). Proof: the README's device table
+  records its check, a simulated device against a real gateway ([ESP32 voice boxes](README.md#esp32-voice-boxes-xiaozhi)).
 - [ ] Optional: bridge the device's MCP tools into Hermes tools
 - [ ] Real-board session
 
 ### M7 — Even Realities G2 ([#24](https://github.com/100yenadmin/glasses-platform/issues/24))
 
 - [x] Even Hub web app on our protocol: glasses mic, reply text on the display, touchpad and ring for approvals,
-  pushes. Client in [clients/even-g2](clients/even-g2/README.md) (0.5.0; `clients/even-g2/test/g2.test.mjs`),
-  checked in the Even Hub simulator against a real gateway.
+  pushes. Client in [clients/even-g2](clients/even-g2/README.md) (0.5.0). Proof:
+  [clients/even-g2/test/g2.test.mjs](clients/even-g2/test/g2.test.mjs), and a check in the Even Hub simulator against
+  a real gateway.
 - [ ] A build testers can install. Beta testers need no store review; today you build and pack it yourself.
 - [ ] Real-glasses session
 
 ### M8 — Omi pendant ([#25](https://github.com/100yenadmin/glasses-platform/issues/25))
 
-- [x] Live transcripts by webhook into the user's session: `POST /omi/<token>/transcript` (0.5.0; `tests/test_omi.py`)
-- [x] Replies to the pendant: answers, reminders and approval prompts return as Omi notifications (0.5.0)
+- [x] Live transcripts by webhook into the user's session: `POST /omi/<token>/transcript` (0.5.0). Proof:
+  [tests/test_omi.py](tests/test_omi.py).
+- [x] Replies to the pendant: answers, reminders and approval prompts return as Omi notifications (0.5.0). Proof:
+  [tests/test_omi.py](tests/test_omi.py).
 - [ ] Real-pendant session
 
 ### M9 — Android: Wear OS and Android Auto ([#26](https://github.com/100yenadmin/glasses-platform/issues/26))
@@ -143,8 +149,8 @@ A xiaozhi-compatible endpoint covers the 138+ boards of the open-source xiaozhi 
 ### M10 — Pebble ([#27](https://github.com/100yenadmin/glasses-platform/issues/27))
 
 - [x] Bobby talks to Hermes without a fork: the plugin serves Bobby-compatible query and quota endpoints with
-  streamed answers and queued pushes, and Bobby is built with a two-line `urls_override.js` (0.5.0;
-  `tests/test_pebble.py`). Live-tested with a Bobby-protocol client against a real gateway.
+  streamed answers and queued pushes, and Bobby is built with a two-line `urls_override.js` (0.5.0). Proof:
+  [tests/test_pebble.py](tests/test_pebble.py), and a live test with a Bobby-protocol client against a real gateway.
 - [ ] Real-watch session
 
 ### M11 — Mentra glasses ([#28](https://github.com/100yenadmin/glasses-platform/issues/28))

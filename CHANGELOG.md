@@ -2,6 +2,19 @@
 
 Each release has full notes on the [releases page](https://github.com/100yenadmin/glasses-platform/releases).
 
+## 0.6.11 (2026-11-18): roadmap status; docs only
+
+No change to the plugin itself: a gateway running 0.6.9 or 0.6.10 behaves the same.
+- **ROADMAP.md says where things stand.** It lists what is committed next (streaming voice out,
+  [#14](https://github.com/100yenadmin/glasses-platform/issues/14), and
+  [#72](https://github.com/100yenadmin/glasses-platform/issues/72)) and what waits on real devices (M2, M4's exit
+  criterion and M5–M11). The device bridges M5–M11 now have checkboxes that match their tracking issues, ticked
+  where the server side shipped with tests ([#91](https://github.com/100yenadmin/glasses-platform/pull/91)).
+- **Corrections.** Voice out is partly shipped: whole-reply audio since 0.4.0, with streaming still open. The agent's
+  device actions are showing text and buzzing; reading location is not built. The Meta AI Connectors endpoint is on
+  the watch list, not planned.
+- **AGENTS.md** has a release closeout rule.
+
 ## 0.6.10 (2026-11-18): G2 build tools updated; no plugin changes
 
 No change to the plugin itself: a gateway running 0.6.9 behaves the same.

@@ -70,7 +70,9 @@ After the release is published and its receipt sent:
    each with its proof linked (tests or a live proof). Close a milestone once all its issues are closed and its exit
    criteria are proven.
 3. Update every README / ROADMAP line that names the latest release or what ships next.
-4. Send the Plugin Manager one closeout line: issues closed, boxes ticked, docs updated (or "none").
+4. Post one closeout line as a comment on the release pull request: issues closed, boxes ticked, docs updated (or
+   "none"). Every release here, including an rc promoted to stable or a GA tag, goes through a `release/x.y.z` pull
+   request into `main`, so that pull request always exists.
 
 ## Security
 
